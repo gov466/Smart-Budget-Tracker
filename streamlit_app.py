@@ -18,6 +18,19 @@ from collections import defaultdict
 from PIL import Image
 import anthropic
 
+# File handling - MUST BE FIRST
+EXPENSES_FILE = "expenses.json"
+
+def load_expenses():
+    """Load expenses from file."""
+    if os.path.exists(EXPENSES_FILE):
+        try:
+            with open(EXPENSES_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
 # Page config
 st.set_page_config(
     page_title="💰 Budget Tracker",
@@ -28,46 +41,7 @@ st.set_page_config(
 
 # Initialize session state
 if 'expenses' not in st.session_state:
-    st.session_state.expenses = []
-    load_expenses()
-
-# CSS styling
-st.markdown("""
-    <style>
-    .main {
-        max-width: 600px;
-        margin: 0 auto;
-    }
-    .metric {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-        margin: 10px 0;
-    }
-    .metric-value {
-        font-size: 2em;
-        font-weight: bold;
-    }
-    .metric-label {
-        font-size: 0.9em;
-        opacity: 0.9;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# File handling
-EXPENSES_FILE = "expenses.json"
-
-def load_expenses():
-    """Load expenses from file."""
-    if os.path.exists(EXPENSES_FILE):
-        try:
-            with open(EXPENSES_FILE, 'r') as f:
-                st.session_state.expenses = json.load(f)
-        except:
-            st.session_state.expenses = []
+    st.session_state.expenses = load_expenses()
 
 def save_expenses():
     """Save expenses to file."""
