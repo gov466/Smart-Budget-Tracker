@@ -1,9 +1,14 @@
 """
-Smart Budget Tracker - Streamlit Version
-=========================================
+Smart Budget Tracker - Enhanced Version
+========================================
 
-Mobile-friendly budget tracking with receipt OCR
-Deploy to Streamlit Cloud (free, no laptop needed)
+Features:
+1. Receipt upload + extraction
+2. Budget management per category
+3. Weekly trend comparison
+4. Smart store recommendations
+5. Item pattern learning
+6. Category overspending alerts
 
 Run: streamlit run streamlit_app.py
 """
@@ -12,14 +17,16 @@ import streamlit as st
 import json
 import os
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
 from PIL import Image
 import anthropic
+import pandas as pd
 
 # File handling - MUST BE FIRST
 EXPENSES_FILE = "expenses.json"
+BUDGETS_FILE = "budgets.json"
 
 def load_expenses():
     """Load expenses from file."""
@@ -30,6 +37,16 @@ def load_expenses():
         except:
             return []
     return []
+
+def load_budgets():
+    """Load budget settings."""
+    if os.path.exists(BUDGETS_FILE):
+        try:
+            with open(BUDGETS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
 
 # Page config
 st.set_page_config(
@@ -43,10 +60,18 @@ st.set_page_config(
 if 'expenses' not in st.session_state:
     st.session_state.expenses = load_expenses()
 
+if 'budgets' not in st.session_state:
+    st.session_state.budgets = load_budgets()
+
 def save_expenses():
     """Save expenses to file."""
     with open(EXPENSES_FILE, 'w') as f:
         json.dump(st.session_state.expenses, f, indent=2)
+
+def save_budgets():
+    """Save budgets to file."""
+    with open(BUDGETS_FILE, 'w') as f:
+        json.dump(st.session_state.budgets, f, indent=2)
 
 def extract_receipt(image_bytes):
     """Extract receipt details using Claude Vision."""
@@ -177,12 +202,151 @@ def analyze_expenses():
         'highest_category': max(categories, key=categories.get) if categories else 'N/A'
     }
 
+def get_weekly_comparison():
+    """Compare this week vs last week."""
+    if not st.session_state.expenses:
+        return None
+    
+    today = datetime.now()
+    week_ago = today - timedelta(days=7)
+    two_weeks_ago = today - timedelta(days=14)
+    
+    this_week = defaultdict(float)
+    last_week = defaultdict(float)
+    
+    for exp in st.session_state.expenses:
+        try:
+            exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
+            cat = exp.get('category', 'Other')
+            amt = exp.get('total', 0)
+            
+            if exp_date >= week_ago:
+                this_week[cat] += amt
+            elif exp_date >= two_weeks_ago:
+                last_week[cat] += amt
+        except:
+            pass
+    
+    return {
+        'this_week': dict(this_week),
+        'last_week': dict(last_week)
+    }
+
+def get_store_recommendation():
+    """Smart store recommendation based on buying patterns."""
+    if not st.session_state.expenses:
+        return None
+    
+    # Get this week's groceries
+    today = datetime.now()
+    week_ago = today - timedelta(days=7)
+    
+    weekly_items = defaultdict(list)
+    stores = defaultdict(float)
+    
+    for exp in st.session_state.expenses:
+        try:
+            if exp.get('category') != 'Groceries':
+                continue
+                
+            exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
+            if exp_date < week_ago:
+                continue
+            
+            store = exp.get('merchant', 'Unknown')
+            total = exp.get('total', 0)
+            items = exp.get('items', [])
+            
+            # Track items by name
+            for item in items:
+                item_name = item.get('name', 'Item').lower()
+                weekly_items[item_name].append({
+                    'store': store,
+                    'price': item.get('price', 0),
+                    'quantity': item.get('quantity', 1)
+                })
+            
+            stores[store] += total
+        except:
+            pass
+    
+    if not weekly_items or not stores:
+        return None
+    
+    # Calculate average prices per item at each store
+    store_prices = defaultdict(lambda: defaultdict(list))
+    
+    for item_name, prices in weekly_items.items():
+        for price_info in prices:
+            store = price_info['store']
+            price = price_info['price']
+            store_prices[store][item_name].append(price)
+    
+    # Estimate total cost at each store
+    store_estimates = {}
+    for store in stores.keys():
+        estimated_total = 0
+        for item_name, prices in weekly_items.items():
+            if item_name in store_prices[store]:
+                avg_price = sum(store_prices[store][item_name]) / len(store_prices[store][item_name])
+                estimated_total += avg_price
+        store_estimates[store] = round(estimated_total, 2)
+    
+    if not store_estimates:
+        return None
+    
+    cheapest_store = min(store_estimates, key=store_estimates.get)
+    current_avg = sum(stores.values()) / len(stores)
+    potential_savings = current_avg - store_estimates[cheapest_store]
+    
+    return {
+        'cheapest_store': cheapest_store,
+        'estimated_cost': store_estimates[cheapest_store],
+        'current_avg': round(current_avg, 2),
+        'potential_savings': round(potential_savings, 2),
+        'store_estimates': store_estimates,
+        'item_count': len(weekly_items)
+    }
+
+def get_budget_alerts():
+    """Get budget alerts for overspending."""
+    if not st.session_state.budgets:
+        return []
+    
+    analysis = analyze_expenses()
+    alerts = []
+    
+    for category, budget in st.session_state.budgets.items():
+        spent = analysis.get('categories', {}).get(category, 0)
+        percentage = (spent / budget * 100) if budget > 0 else 0
+        
+        if percentage >= 100:
+            alerts.append({
+                'category': category,
+                'spent': spent,
+                'budget': budget,
+                'percentage': round(percentage, 1),
+                'status': '🔴 OVER BUDGET',
+                'overage': round(spent - budget, 2)
+            })
+        elif percentage >= 80:
+            alerts.append({
+                'category': category,
+                'spent': spent,
+                'budget': budget,
+                'percentage': round(percentage, 1),
+                'status': '🟡 WARNING',
+                'remaining': round(budget - spent, 2)
+            })
+    
+    return alerts
+
 # Main UI
 st.title("💰 Smart Budget Tracker")
-st.markdown("Upload receipt photos to track spending")
+st.markdown("Upload receipt photos to track spending with AI insights")
 
 # Tabs
-tab1, tab2 = st.tabs(["📸 Upload Receipt", "📊 History"])
+tab1, tab2, tab3, tab4 = st.tabs(["📸 Upload", "📊 Dashboard", "⚙️ Budgets", "🏪 Store Tips"])
 
 with tab1:
     st.markdown("### Upload Receipt Photo")
@@ -194,27 +358,22 @@ with tab1:
     )
     
     if uploaded_file:
-        # Show image
         image = Image.open(uploaded_file)
         st.image(image, use_container_width=True)
         
-        # Process
         if st.button("🤖 Process Receipt", use_container_width=True):
             with st.spinner("Processing receipt..."):
                 image_bytes = uploaded_file.getvalue()
                 receipt = extract_receipt(image_bytes)
                 
                 if receipt:
-                    # Categorize
                     category = categorize_expense(receipt)
                     receipt['category'] = category
                     receipt['uploaded_at'] = datetime.now().isoformat()
                     
-                    # Save
                     st.session_state.expenses.append(receipt)
                     save_expenses()
                     
-                    # Show results
                     st.success("✅ Receipt processed!")
                     
                     col1, col2, col3 = st.columns(3)
@@ -235,6 +394,28 @@ with tab2:
     if st.session_state.expenses:
         analysis = analyze_expenses()
         
+        # BUDGET ALERTS
+        alerts = get_budget_alerts()
+        if alerts:
+            st.markdown("### 🚨 Budget Alerts")
+            for alert in alerts:
+                if alert['status'] == '🔴 OVER BUDGET':
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.error(f"{alert['category']}: {alert['status']}")
+                    with col2:
+                        st.metric("Spent", f"${alert['spent']:.2f}")
+                    with col3:
+                        st.metric("Over by", f"${alert['overage']:.2f}")
+                else:
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.warning(f"{alert['category']}: {alert['status']}")
+                    with col2:
+                        st.metric("Spent", f"${alert['spent']:.2f}")
+                    with col3:
+                        st.metric("Remaining", f"${alert['remaining']:.2f}")
+        
         # Metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -245,6 +426,26 @@ with tab2:
             st.metric("Purchases", analysis['num_expenses'])
         with col4:
             st.metric("Avg Purchase", f"${analysis['avg_expense']:.2f}")
+        
+        # WEEKLY COMPARISON
+        weekly = get_weekly_comparison()
+        if weekly and (weekly['this_week'] or weekly['last_week']):
+            st.markdown("### 📈 Weekly Comparison")
+            
+            for category in set(list(weekly['this_week'].keys()) + list(weekly['last_week'].keys())):
+                this = weekly['this_week'].get(category, 0)
+                last = weekly['last_week'].get(category, 0)
+                
+                if last > 0:
+                    change = ((this - last) / last * 100)
+                    if change > 0:
+                        st.write(f"**{category}:** ${this:.2f} (↑ {change:.0f}% vs last week: ${last:.2f})")
+                    elif change < 0:
+                        st.write(f"**{category}:** ${this:.2f} (↓ {-change:.0f}% vs last week: ${last:.2f})")
+                    else:
+                        st.write(f"**{category}:** ${this:.2f} (same as last week)")
+                else:
+                    st.write(f"**{category}:** ${this:.2f} (new this week)")
         
         # Prediction
         predicted_month = analysis['daily_average'] * 30
@@ -291,5 +492,66 @@ with tab2:
     else:
         st.info("📸 No expenses yet. Upload a receipt to get started!")
 
+with tab3:
+    st.markdown("### Set Budget by Category")
+    
+    categories = ['Groceries', 'Dining', 'Transportation', 'Utilities', 'Entertainment', 'Shopping', 'Healthcare']
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_category = st.selectbox("Select Category", categories)
+    
+    with col2:
+        current_budget = st.session_state.budgets.get(selected_category, 0)
+        budget_amount = st.number_input(
+            f"Monthly Budget for {selected_category}",
+            min_value=0.0,
+            value=float(current_budget),
+            step=10.0
+        )
+    
+    if st.button("💾 Save Budget"):
+        st.session_state.budgets[selected_category] = budget_amount
+        save_budgets()
+        st.success(f"✅ Budget set: ${budget_amount:.2f}/month for {selected_category}")
+    
+    st.markdown("### Current Budgets")
+    if st.session_state.budgets:
+        for cat, budget in st.session_state.budgets.items():
+            st.write(f"**{cat}:** ${budget:.2f}/month")
+    else:
+        st.info("No budgets set yet")
+
+with tab4:
+    st.markdown("### 🏪 Smart Store Recommendations")
+    
+    if st.session_state.expenses:
+        rec = get_store_recommendation()
+        
+        if rec:
+            st.success(f"💡 **SAVE ${rec['potential_savings']:.2f} THIS WEEK!**")
+            
+            st.markdown(f"### Go to **{rec['cheapest_store'].upper()}** 🎯")
+            st.write(f"Estimated cost for your {rec['item_count']} regular items: **${rec['estimated_cost']:.2f}**")
+            st.write(f"Your current average: ${rec['current_avg']:.2f}")
+            st.write(f"**Potential savings: ${rec['potential_savings']:.2f}**")
+            
+            st.markdown("### Store Comparison")
+            store_df = pd.DataFrame([
+                {'Store': store, 'Estimated Cost': f"${cost:.2f}"}
+                for store, cost in rec['store_estimates'].items()
+            ])
+            st.table(store_df)
+            
+            st.markdown("---")
+            st.write("💡 **How this works:**")
+            st.write("- Tracks items you regularly buy")
+            st.write("- Compares prices across stores")
+            st.write("- Recommends cheapest option for your weekly shop")
+        else:
+            st.info("📸 Upload more grocery receipts from different stores to see recommendations!")
+    else:
+        st.info("📸 Upload receipts to get smart store recommendations!")
+
 st.markdown("---")
-st.markdown("Built with Claude Vision API + Streamlit")
+st.markdown("Built with Claude Vision API + Streamlit | Smart Budgeting with AI")
