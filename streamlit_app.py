@@ -196,7 +196,7 @@ with tab1:
     if uploaded_file:
         # Show image
         image = Image.open(uploaded_file)
-        st.image(image, use_column_width=True)
+        st.image(image, use_container_width=True)
         
         # Process
         if st.button("🤖 Process Receipt", use_container_width=True):
