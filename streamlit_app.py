@@ -73,7 +73,7 @@ def extract_receipt(image_bytes):
 Be precise. Only output JSON."""
         
         message = client.messages.create(
-            model="claude-opus-4-1",
+            model="claude-opus-4-8",
             max_tokens=1000,
             messages=[{
                 "role": "user",
