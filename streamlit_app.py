@@ -1,14 +1,11 @@
 """
-Smart Budget Tracker - Complete Household Finance Tracker
-==========================================================
+Health & Wealth Tracker
+=======================
 
-Features:
-1. Monthly income tracking (both salaries)
-2. Fixed expenses (auto-deducted monthly)
-3. Debt management & payoff tracking
-4. Variable spending (receipts)
-5. Complete financial dashboard
-6. Smart store recommendations
+Complete life management app combining:
+1. Financial tracking (income, expenses, debts)
+2. Health tracking (blood tests, medical reports, trends)
+3. Smart nutrition (personalized grocery recommendations)
 
 Run: streamlit run streamlit_app.py
 """
@@ -28,76 +25,43 @@ EXPENSES_FILE = "expenses.json"
 BUDGETS_FILE = "budgets.json"
 SETTINGS_FILE = "settings.json"
 DEBTS_FILE = "debts.json"
+HEALTH_FILE = "health.json"
+HEALTH_REPORTS_FILE = "health_reports.json"
 
-def load_expenses():
-    if os.path.exists(EXPENSES_FILE):
+def load_file(filename):
+    if os.path.exists(filename):
         try:
-            with open(EXPENSES_FILE, 'r') as f:
+            with open(filename, 'r') as f:
                 return json.load(f)
         except:
-            return []
-    return []
+            return {} if 'json' in filename else []
+    return {} if 'json' in filename else []
 
-def load_budgets():
-    if os.path.exists(BUDGETS_FILE):
-        try:
-            with open(BUDGETS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def load_debts():
-    if os.path.exists(DEBTS_FILE):
-        try:
-            with open(DEBTS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_expenses():
-    with open(EXPENSES_FILE, 'w') as f:
-        json.dump(st.session_state.expenses, f, indent=2)
-
-def save_budgets():
-    with open(BUDGETS_FILE, 'w') as f:
-        json.dump(st.session_state.budgets, f, indent=2)
-
-def save_settings():
-    with open(SETTINGS_FILE, 'w') as f:
-        json.dump(st.session_state.settings, f, indent=2)
-
-def save_debts():
-    with open(DEBTS_FILE, 'w') as f:
-        json.dump(st.session_state.debts, f, indent=2)
+def save_file(filename, data):
+    with open(filename, 'w') as f:
+        json.dump(data, f, indent=2)
 
 # Page config
 st.set_page_config(
-    page_title="💰 Household Budget Tracker",
-    page_icon="💰",
+    page_title="🏥 Health & Wealth Tracker",
+    page_icon="🏥",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
 # Initialize session state
 if 'expenses' not in st.session_state:
-    st.session_state.expenses = load_expenses()
+    st.session_state.expenses = load_file(EXPENSES_FILE)
 if 'budgets' not in st.session_state:
-    st.session_state.budgets = load_budgets()
+    st.session_state.budgets = load_file(BUDGETS_FILE)
 if 'settings' not in st.session_state:
-    st.session_state.settings = load_settings()
+    st.session_state.settings = load_file(SETTINGS_FILE)
 if 'debts' not in st.session_state:
-    st.session_state.debts = load_debts()
+    st.session_state.debts = load_file(DEBTS_FILE)
+if 'health_metrics' not in st.session_state:
+    st.session_state.health_metrics = load_file(HEALTH_FILE)
+if 'health_reports' not in st.session_state:
+    st.session_state.health_reports = load_file(HEALTH_REPORTS_FILE)
 
 def extract_receipt(image_bytes):
     try:
@@ -163,16 +127,116 @@ Output ONLY category name."""
     except:
         return 'Other'
 
+def analyze_health_metrics():
+    """Analyze current health based on metrics."""
+    if not st.session_state.health_metrics:
+        return None
+    
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        
+        latest = st.session_state.health_metrics[-1] if st.session_state.health_metrics else {}
+        metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'report_file', 'added_at']])
+        
+        prompt = f"""Analyze these health metrics and provide brief assessment.
+
+Metrics:
+{metrics_text}
+
+Provide ONLY a JSON response with this structure:
+{{
+    "overall_status": "Good/Fair/Concerning",
+    "flags": ["High cholesterol", "Good blood pressure"],
+    "recommendations": ["Reduce salt intake", "Increase fiber"],
+    "diet_guidance": "What food groups to focus on or avoid"
+}}"""
+        
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        return json.loads(message.content[0].text)
+    except:
+        return None
+
+def get_grocery_recommendations():
+    """Give personalized grocery recommendations based on health metrics and purchase history."""
+    if not st.session_state.health_metrics or not st.session_state.expenses:
+        return None
+    
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        
+        # Get recent grocery items
+        recent_items = defaultdict(int)
+        today = datetime.now()
+        month_ago = today - timedelta(days=30)
+        
+        for exp in st.session_state.expenses:
+            if exp.get('category') != 'Groceries':
+                continue
+            try:
+                exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
+                if exp_date >= month_ago:
+                    for item in exp.get('items', []):
+                        item_name = item.get('name', '')
+                        recent_items[item_name] += 1
+            except:
+                pass
+        
+        if not recent_items:
+            return None
+        
+        latest_health = st.session_state.health_metrics[-1]
+        health_text = '\n'.join([f"- {k}: {v}" for k, v in latest_health.items() if k not in ['date', 'report_file', 'added_at']])
+        items_text = '\n'.join([f"- {item} (bought {count} times)" for item, count in list(recent_items.items())[:10]])
+        
+        prompt = f"""Based on their health metrics and grocery purchases, give recommendations.
+
+Health Status:
+{health_text}
+
+Items They Usually Buy:
+{items_text}
+
+For EACH item they buy, suggest:
+- Keep buying: for positive nutrients
+- Reduce: if bad for their health condition
+- Replace with: better alternative
+
+Output ONLY JSON:
+{{
+    "recommendations": [
+        {{"item": "Chicken", "status": "Keep", "reason": "Good protein"}},
+        {{"item": "Bacon", "status": "Reduce", "reason": "High sodium - you have high BP"}},
+        {{"item": "Spinach", "status": "Keep", "reason": "Lowers cholesterol"}},
+        {{"item": "Replace with", "recommendation": "Use olive oil instead of butter"}}
+    ],
+    "overall_grade": "8/10",
+    "summary": "Your grocery choices are generally healthy. Focus on reducing salt."
+}}"""
+        
+        message = client.messages.create(
+            model="claude-opus-4-8",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        return json.loads(message.content[0].text)
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return None
+
 def calculate_monthly_finances():
     """Calculate complete monthly financial overview."""
     settings = st.session_state.settings
     
-    # Income
     your_salary = float(settings.get('your_salary', 0))
     wife_salary = float(settings.get('wife_salary', 0))
     total_income = your_salary + wife_salary
     
-    # Fixed expenses
     fixed_expenses = {}
     fixed_total = 0
     for key in settings:
@@ -182,12 +246,10 @@ def calculate_monthly_finances():
             fixed_expenses[expense_name] = amount
             fixed_total += amount
     
-    # Debt payments
     debt_total = 0
     for debt in st.session_state.debts:
         debt_total += float(debt.get('monthly_payment', 0))
     
-    # Variable expenses this month
     today = datetime.now()
     month_start = today.replace(day=1)
     
@@ -218,12 +280,12 @@ def calculate_monthly_finances():
     }
 
 # Main UI
-st.title("💰 Household Budget Tracker")
-st.markdown("Track income, expenses, debts & savings - your path to being debt-free")
+st.title("🏥 Health & Wealth Tracker")
+st.markdown("Complete life management: Finance + Health + Smart Nutrition")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚙️ Setup", "💳 Debts", "📸 Spending", "📊 Dashboard", "🎯 Budgets"])
+tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "📊 Wealth", "🏥 Health", "🥗 Smart Grocery", "🎯 Budgets"])
 
-with tab1:
+with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
     
     st.markdown("#### 💵 Monthly Income")
@@ -257,10 +319,10 @@ with tab1:
         st.session_state.settings['wife_salary'] = wife_sal
         for key, val in fixed_values.items():
             st.session_state.settings[key] = val
-        save_settings()
+        save_file(SETTINGS_FILE, st.session_state.settings)
         st.success("✅ Saved!")
 
-with tab2:
+with tabs[1]:  # Debts
     st.markdown("### Debt Tracking & Management")
     
     st.markdown("#### ➕ Add New Debt")
@@ -287,7 +349,7 @@ with tab2:
                 'months_to_payoff': months_to_payoff
             }
             st.session_state.debts.append(new_debt)
-            save_debts()
+            save_file(DEBTS_FILE, st.session_state.debts)
             st.success(f"✅ {debt_name} added! Payoff timeline: {months_to_payoff} months")
     
     st.markdown("#### 📋 Your Debts")
@@ -309,7 +371,7 @@ with tab2:
             with col5:
                 if st.button("❌", key=f"del_debt_{i}"):
                     st.session_state.debts.pop(i)
-                    save_debts()
+                    save_file(DEBTS_FILE, st.session_state.debts)
                     st.rerun()
             
             total_debt += debt['principal']
@@ -324,13 +386,11 @@ with tab2:
         with col3:
             max_months = max([d['months_to_payoff'] for d in st.session_state.debts], default=0)
             st.metric("Debt-Free Timeline", f"{max_months} months")
-    else:
-        st.info("No debts tracked yet. Add one above!")
 
-with tab3:
+with tabs[2]:  # Spending
     st.markdown("### 📸 Track Variable Spending (Receipts)")
     
-    uploaded_file = st.file_uploader("Upload Receipt", type=["jpg", "jpeg", "png", "gif", "webp"])
+    uploaded_file = st.file_uploader("Upload Receipt", type=["jpg", "jpeg", "png", "gif", "webp"], key="receipt_upload")
     
     if uploaded_file:
         image = Image.open(uploaded_file)
@@ -346,7 +406,7 @@ with tab3:
                     receipt['uploaded_at'] = datetime.now().isoformat()
                     
                     st.session_state.expenses.append(receipt)
-                    save_expenses()
+                    save_file(EXPENSES_FILE, st.session_state.expenses)
                     
                     st.success("✅ Receipt processed!")
                     col1, col2, col3 = st.columns(3)
@@ -357,13 +417,10 @@ with tab3:
                     with col3:
                         st.metric("Category", category)
 
-with tab4:
+with tabs[3]:  # Wealth Dashboard
     st.markdown("### 📊 Complete Financial Dashboard")
     
     finances = calculate_monthly_finances()
-    
-    # Header
-    st.markdown("#### 💰 Monthly Financial Overview")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -373,9 +430,8 @@ with tab4:
     with col3:
         st.metric("Variable Spent", f"${finances['variable_total']:.2f}")
     with col4:
-        st.metric("Remaining", f"${finances['remaining']:.2f}", delta=f"Surplus" if finances['remaining'] > 0 else "Deficit")
+        st.metric("Remaining", f"${finances['remaining']:.2f}")
     
-    # Income Breakdown
     st.markdown("#### 📥 Income")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -385,47 +441,133 @@ with tab4:
     with col3:
         st.write(f"**Total: ${finances['total_income']:.2f}**")
     
-    # Fixed Expenses
-    st.markdown("#### 🔧 Fixed Monthly Expenses (Auto-Deducted)")
+    st.markdown("#### 🔧 Fixed Monthly Expenses")
     if finances['fixed_expenses']:
         for expense, amount in finances['fixed_expenses'].items():
             st.write(f"• {expense}: ${amount:.2f}")
         st.write(f"**Subtotal: ${finances['fixed_total']:.2f}**")
     
-    # Debt Payments
-    st.markdown("#### 💳 Monthly Debt Payments")
+    st.markdown("#### 💳 Debt Payments")
     if st.session_state.debts:
         for debt in st.session_state.debts:
             st.write(f"• {debt['name']}: ${debt['monthly_payment']:.2f}")
         st.write(f"**Subtotal: ${finances['debt_payments']:.2f}**")
-    
-    # Available for Variable
-    st.markdown("#### 💵 Available for Variable Spending")
-    available = finances['available_after_fixed_debt']
-    spent = finances['variable_total']
-    remaining = available - spent
-    
-    st.info(f"Budget: ${available:.2f} | Spent: ${spent:.2f} | Remaining: ${remaining:.2f}")
-    
-    # Variable by Category
-    st.markdown("#### 📊 Variable Spending by Category (This Month)")
-    if finances['variable_by_category']:
-        for cat, amt in finances['variable_by_category'].items():
-            st.write(f"• {cat}: ${amt:.2f}")
-    
-    # Debt Progress
-    st.markdown("#### 🎯 Debt Payoff Progress")
-    if st.session_state.debts:
+        
         total_debt = sum(d['principal'] for d in st.session_state.debts)
-        st.info(f"Total Remaining Debt: **${total_debt:.2f}**")
-        st.write("Payoff Timeline:")
-        for debt in st.session_state.debts:
-            months = debt['months_to_payoff']
-            years = months / 12
-            st.write(f"• {debt['name']}: {months} months ({years:.1f} years)")
+        max_months = max([d['months_to_payoff'] for d in st.session_state.debts], default=0)
+        st.success(f"🎯 **DEBT-FREE IN {max_months} MONTHS!** (Total debt: ${total_debt:.2f})")
 
-with tab5:
-    st.markdown("### 🎯 Set Monthly Budgets for Variable Spending")
+with tabs[4]:  # Health
+    st.markdown("### 🏥 Health Tracking & Analysis")
+    
+    st.markdown("#### 📤 Upload Medical Reports")
+    col1, col2 = st.columns(2)
+    with col1:
+        report_type = st.selectbox("Report Type", ["Blood Test", "Physical Exam", "Other Medical Report"])
+    with col2:
+        report_date = st.date_input("Report Date")
+    
+    uploaded_report = st.file_uploader("Upload PDF or Image", type=["pdf", "jpg", "jpeg", "png"], key="health_upload")
+    
+    if uploaded_report and st.button("📎 Save Report"):
+        report_data = {
+            'type': report_type,
+            'date': str(report_date),
+            'filename': uploaded_report.name,
+            'uploaded_at': datetime.now().isoformat()
+        }
+        st.session_state.health_reports.append(report_data)
+        save_file(HEALTH_REPORTS_FILE, st.session_state.health_reports)
+        st.success("✅ Report saved!")
+    
+    st.markdown("#### 📊 Enter Health Metrics Manually")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        metric_date = st.date_input("Test Date", key="metric_date")
+    with col2:
+        metric_type = st.selectbox("Metric Type", ["Blood Test Results", "Blood Pressure", "Weight/BMI", "Other"], key="metric_type")
+    with col3:
+        metric_name = st.text_input("Metric Name (e.g., Cholesterol, Blood Sugar)", key="metric_name")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        metric_value = st.number_input("Value", step=0.1, key="metric_value")
+    with col2:
+        metric_unit = st.text_input("Unit (mg/dL, mmol/L, etc)", key="metric_unit")
+    with col3:
+        metric_normal = st.text_input("Normal Range (e.g., 120-200)", key="metric_normal")
+    
+    if st.button("✅ Add Health Metric"):
+        health_entry = {
+            'date': str(metric_date),
+            'type': metric_type,
+            'metric': metric_name,
+            'value': metric_value,
+            'unit': metric_unit,
+            'normal_range': metric_normal,
+            'added_at': datetime.now().isoformat()
+        }
+        st.session_state.health_metrics.append(health_entry)
+        save_file(HEALTH_FILE, st.session_state.health_metrics)
+        st.success("✅ Metric saved!")
+    
+    st.markdown("#### 📈 Health Trends & Analysis")
+    if st.session_state.health_metrics:
+        latest_analysis = analyze_health_metrics()
+        
+        if latest_analysis:
+            col1, col2 = st.columns(2)
+            with col1:
+                status = latest_analysis.get('overall_status', 'Unknown')
+                status_emoji = "✅" if status == "Good" else "⚠️" if status == "Fair" else "🔴"
+                st.write(f"**Overall Status: {status_emoji} {status}**")
+            
+            with col2:
+                if latest_analysis.get('flags'):
+                    st.write("**⚠️ Flags:**")
+                    for flag in latest_analysis.get('flags', []):
+                        st.write(f"  • {flag}")
+            
+            st.markdown("**💡 Health Recommendations:**")
+            for rec in latest_analysis.get('recommendations', []):
+                st.write(f"  • {rec}")
+            
+            st.markdown("**🥗 Diet Guidance:**")
+            st.write(latest_analysis.get('diet_guidance', 'No guidance available'))
+        
+        st.markdown("#### 📋 Your Metrics History")
+        for metric in reversed(st.session_state.health_metrics[-10:]):
+            st.write(f"**{metric['date']}** - {metric['metric']}: {metric['value']} {metric['unit']} (Normal: {metric['normal_range']})")
+
+with tabs[5]:  # Smart Grocery
+    st.markdown("### 🥗 Smart Grocery Recommendations")
+    
+    if st.session_state.health_metrics and st.session_state.expenses:
+        recommendations = get_grocery_recommendations()
+        
+        if recommendations:
+            st.success(f"**Overall Grade: {recommendations.get('overall_grade', 'N/A')}**")
+            st.write(recommendations.get('summary', ''))
+            
+            st.markdown("#### 🛒 Your Usual Items - Health Assessment:")
+            for rec in recommendations.get('recommendations', []):
+                item = rec.get('item')
+                status = rec.get('status')
+                reason = rec.get('reason')
+                
+                if status == "Keep":
+                    st.write(f"✅ **{item}** - {reason}")
+                elif status == "Reduce":
+                    st.write(f"⚠️ **{item}** - {reason}")
+                else:
+                    st.write(f"💡 {reason}")
+        else:
+            st.info("📸 Upload more grocery receipts to get personalized recommendations!")
+    else:
+        st.info("📊 Add health metrics and upload grocery receipts to get smart recommendations!")
+
+with tabs[6]:  # Budgets
+    st.markdown("### 🎯 Set Monthly Budgets")
     
     categories = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
     
@@ -435,8 +577,8 @@ with tab5:
         st.session_state.budgets[cat] = budget
     
     if st.button("💾 Save Budgets"):
-        save_budgets()
+        save_file(BUDGETS_FILE, st.session_state.budgets)
         st.success("✅ Budgets saved!")
 
 st.markdown("---")
-st.markdown("💡 **This tracker helps you:** Track every penny | See debt payoff timeline | Plan for financial freedom")
+st.markdown("💡 **Health & Wealth: Your complete life tracker** - Finances + Health + Smart Nutrition")
