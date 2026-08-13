@@ -142,6 +142,53 @@ def save_debt_to_gsheet(debt):
         st.error(f"Error saving debt: {str(e)}")
         return False
 
+def delete_debt_from_gsheet(debt_name):
+    """Delete debt row from Google Sheets"""
+    try:
+        sheet = get_gsheet_client()
+        if not sheet:
+            return False
+        
+        ws = get_or_create_worksheet(sheet, "Debts")
+        records = ws.get_all_records()
+        
+        # Find and delete the row with matching name
+        for idx, record in enumerate(records, start=2):  # start=2 because row 1 is header
+            if record.get('name') == debt_name:
+                ws.delete_rows(idx)
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Error deleting debt: {str(e)}")
+        return False
+
+def update_debt_in_gsheet(old_name, new_debt):
+    """Update debt in Google Sheets"""
+    try:
+        sheet = get_gsheet_client()
+        if not sheet:
+            return False
+        
+        ws = get_or_create_worksheet(sheet, "Debts")
+        records = ws.get_all_records()
+        
+        # Find and update the row
+        for idx, record in enumerate(records, start=2):
+            if record.get('name') == old_name:
+                ws.update_values(f'A{idx}:F{idx}', [[
+                    new_debt.get('name', ''),
+                    new_debt.get('principal', ''),
+                    new_debt.get('monthly_payment', ''),
+                    new_debt.get('interest_rate', ''),
+                    new_debt.get('months_to_payoff', ''),
+                    new_debt.get('created_date', '')
+                ]])
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Error updating debt: {str(e)}")
+        return False
+
 def save_expense_to_gsheet(expense):
     """Add new expense to Google Sheets"""
     try:
@@ -469,8 +516,8 @@ with tabs[1]:  # Debts
         total_debt = 0
         total_monthly_payment = 0
         
-        for debt in st.session_state.debts:
-            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+        for i, debt in enumerate(st.session_state.debts):
+            col1, col2, col3, col4, col5, col6 = st.columns([2, 1, 1, 1, 0.7, 0.7])
             
             with col1:
                 st.write(f"**{debt.get('name', 'N/A')}**")
@@ -480,6 +527,50 @@ with tabs[1]:  # Debts
                 st.write(f"${debt.get('monthly_payment', 0):.2f}/mo")
             with col4:
                 st.write(f"{debt.get('months_to_payoff', 0)} months")
+            with col5:
+                if st.button("✏️", key=f"edit_debt_{i}", help="Edit"):
+                    st.session_state[f"editing_debt_{i}"] = not st.session_state.get(f"editing_debt_{i}", False)
+            with col6:
+                if st.button("🗑️", key=f"del_debt_{i}", help="Delete"):
+                    if delete_debt_from_gsheet(debt.get('name', '')):
+                        st.session_state.debts.pop(i)
+                        st.success(f"✅ {debt.get('name', '')} deleted!")
+                        st.rerun()
+            
+            # Edit form
+            if st.session_state.get(f"editing_debt_{i}", False):
+                st.write("**Edit Debt:**")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    edit_name = st.text_input("Debt Name", value=debt.get('name', ''), key=f"edit_name_{i}")
+                with col2:
+                    edit_principal = st.number_input("Principal", value=float(debt.get('principal', 0)), key=f"edit_principal_{i}")
+                with col3:
+                    edit_payment = st.number_input("Monthly Payment", value=float(debt.get('monthly_payment', 0)), key=f"edit_payment_{i}")
+                with col4:
+                    edit_rate = st.number_input("Interest Rate %", value=float(debt.get('interest_rate', 0)), key=f"edit_rate_{i}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("💾 Save", key=f"save_edit_{i}"):
+                        new_months = int(edit_principal / edit_payment) if edit_payment > 0 else 0
+                        updated_debt = {
+                            'name': edit_name,
+                            'principal': edit_principal,
+                            'monthly_payment': edit_payment,
+                            'interest_rate': edit_rate,
+                            'months_to_payoff': new_months,
+                            'created_date': debt.get('created_date', '')
+                        }
+                        if update_debt_in_gsheet(debt.get('name', ''), updated_debt):
+                            st.session_state.debts[i] = updated_debt
+                            st.session_state[f"editing_debt_{i}"] = False
+                            st.success("✅ Debt updated!")
+                            st.rerun()
+                with col2:
+                    if st.button("❌ Cancel", key=f"cancel_edit_{i}"):
+                        st.session_state[f"editing_debt_{i}"] = False
+                        st.rerun()
             
             try:
                 total_debt += float(debt.get('principal', 0))
