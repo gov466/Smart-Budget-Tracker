@@ -326,31 +326,35 @@ with tabs[1]:  # Debts
     st.markdown("### Debt Tracking & Management")
     
     st.markdown("#### ➕ Add New Debt")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        debt_name = st.text_input("Debt Name", placeholder="CC Debt / Car Loan / etc")
-    with col2:
-        principal = st.number_input("Principal Remaining (CAD)", min_value=0.0, step=100.0)
-    with col3:
-        monthly_payment = st.number_input("Monthly Payment (CAD)", min_value=0.0, step=50.0)
-    with col4:
-        interest_rate = st.number_input("Interest Rate (%)", min_value=0.0, step=0.1)
-    
-    if st.button("➕ Add Debt"):
-        if debt_name and principal > 0 and monthly_payment > 0:
-            months_to_payoff = int(principal / monthly_payment) if monthly_payment > 0 else 0
-            new_debt = {
-                'name': debt_name,
-                'principal': principal,
-                'monthly_payment': monthly_payment,
-                'interest_rate': interest_rate,
-                'created_date': datetime.now().isoformat(),
-                'months_to_payoff': months_to_payoff
-            }
-            st.session_state.debts.append(new_debt)
-            save_file(DEBTS_FILE, st.session_state.debts)
-            st.success(f"✅ {debt_name} added! Payoff timeline: {months_to_payoff} months")
+    with st.form("add_debt_form", clear_on_submit=True):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            debt_name = st.text_input("Debt Name", placeholder="CC Debt / Car Loan / etc", key="debt_name_input")
+        with col2:
+            principal = st.number_input("Principal Remaining (CAD)", min_value=0.0, step=100.0, key="principal_input")
+        with col3:
+            monthly_payment = st.number_input("Monthly Payment (CAD)", min_value=0.0, step=50.0, key="monthly_payment_input")
+        with col4:
+            interest_rate = st.number_input("Interest Rate (%)", min_value=0.0, step=0.1, key="interest_rate_input")
+        
+        submitted = st.form_submit_button("➕ Add Debt", use_container_width=True)
+        if submitted:
+            if debt_name and principal > 0 and monthly_payment > 0:
+                months_to_payoff = int(principal / monthly_payment) if monthly_payment > 0 else 0
+                new_debt = {
+                    'name': debt_name,
+                    'principal': principal,
+                    'monthly_payment': monthly_payment,
+                    'interest_rate': interest_rate,
+                    'created_date': datetime.now().isoformat(),
+                    'months_to_payoff': months_to_payoff
+                }
+                st.session_state.debts.append(new_debt)
+                save_file(DEBTS_FILE, st.session_state.debts)
+                st.success(f"✅ {debt_name} added! Payoff timeline: {months_to_payoff} months")
+            else:
+                st.warning("Please fill in all fields (name, principal > 0, monthly payment > 0)")
     
     st.markdown("#### 📋 Your Debts")
     if st.session_state.debts:
