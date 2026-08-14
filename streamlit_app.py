@@ -339,13 +339,55 @@ Output ONLY category name."""
     except:
         return 'Other'
 
-def analyze_health_metrics(health_list):
-    """Analyze health metrics"""
-    if not health_list:
-        return None
-    
+def extract_health_report(image_bytes):
+    """Extract health metrics from blood test report using Claude Vision"""
     try:
         client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
+        
+        prompt = """Extract ALL health metrics from this blood test report. Output ONLY valid JSON.
+{
+    "test_date": "YYYY-MM-DD",
+    "metrics": [
+        {
+            "name": "Cholesterol",
+            "value": 200,
+            "unit": "mg/dL",
+            "normal_range": "120-200"
+        },
+        {
+            "name": "Blood Sugar",
+            "value": 95,
+            "unit": "mg/dL",
+            "normal_range": "70-100"
+        }
+    ]
+}
+Extract EVERY metric shown in the report. Be precise with numbers and units."""
+        
+        message = client.messages.create(
+            model="claude-opus-4-8",
+            max_tokens=2000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_data,
+                        },
+                    },
+                    {"type": "text", "text": prompt}
+                ],
+            }],
+        )
+        
+        return json.loads(message.content[0].text)
+    except Exception as e:
+        st.error(f"Error extracting report: {str(e)}")
+        return None
         
         latest = health_list[-1] if health_list else {}
         metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'added_at']])
@@ -681,7 +723,48 @@ with tabs[3]:  # Wealth Dashboard
 with tabs[4]:  # Health
     st.markdown("### 🏥 Health Tracking & Analysis")
     
-    st.markdown("#### 📊 Enter Health Metrics")
+    st.markdown("#### 📄 OR Upload Health Report (Auto-Extract)")
+    uploaded_report = st.file_uploader("Upload Blood Test Report (PDF/Image)", type=["jpg", "jpeg", "png", "gif", "webp", "pdf"], key="health_report_upload")
+    
+    if uploaded_report:
+        st.info("📊 Processing your health report...")
+        if st.button("🤖 Extract Metrics from Report"):
+            with st.spinner("Analyzing report..."):
+                extracted = extract_health_report(uploaded_report.getvalue())
+                
+                if extracted:
+                    st.success("✅ Metrics extracted!")
+                    test_date = extracted.get('test_date', str(datetime.now().date()))
+                    metrics = extracted.get('metrics', [])
+                    
+                    # Display extracted metrics
+                    st.markdown("**Extracted Metrics:**")
+                    for metric in metrics:
+                        st.write(f"• **{metric.get('name')}**: {metric.get('value')} {metric.get('unit')} (Normal: {metric.get('normal_range')})")
+                    
+                    # Auto-save all metrics
+                    if st.button("💾 Save All Metrics to Google Sheets"):
+                        saved_count = 0
+                        for metric in metrics:
+                            health_entry = {
+                                'date': test_date,
+                                'metric': metric.get('name', ''),
+                                'value': metric.get('value', ''),
+                                'unit': metric.get('unit', ''),
+                                'normal_range': metric.get('normal_range', ''),
+                                'type': 'Blood Test',
+                                'added_at': datetime.now().isoformat()
+                            }
+                            if save_health_to_gsheet(health_entry):
+                                st.session_state.health_metrics.append(health_entry)
+                                saved_count += 1
+                        
+                        st.success(f"✅ {saved_count} metrics saved to Google Sheets!")
+                        st.balloons()
+    
+    st.markdown("---")
+    
+    st.markdown("#### 📊 OR Enter Health Metrics Manually")
     with st.form("add_health_form", clear_on_submit=True):
         col1, col2, col3 = st.columns(3)
         with col1:
