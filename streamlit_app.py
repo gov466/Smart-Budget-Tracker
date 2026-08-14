@@ -7,7 +7,7 @@ Features:
 2. Fixed expenses (auto-deducted monthly)
 3. Debt management & payoff tracking
 4. Variable spending (receipts)
-5. Health tracking (blood tests, metrics)
+5. Health tracking (blood tests, metrics) with TREND CHARTS
 6. Smart grocery recommendations
 7. Complete financial dashboard
 8. Data stored in Google Sheets (PERSISTENT!)
@@ -25,6 +25,8 @@ from collections import defaultdict
 from PIL import Image
 import anthropic
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
 
 # Google Sheets configuration
 SPREADSHEET_ID = "1tzRTNtq3N-QPabBSowhmzYXuxHR9bimvYTn1z0wjuQs"
@@ -40,19 +42,32 @@ def get_gsheet_client():
         st.info("Make sure Streamlit Secrets are set up correctly!")
         return None
 
-def get_or_create_worksheet(sheet, name, headers=None):
-    """Get worksheet by name or create if it doesn't exist, with headers"""
+def ensure_headers(ws, headers):
+    """Ensure worksheet has proper headers - insert if needed"""
+    try:
+        all_values = ws.get_all_values()
+        
+        # If worksheet is empty, add headers
+        if not all_values:
+            ws.insert_row(headers, 1)
+            return
+        
+        # If first row doesn't match headers, insert headers at top
+        first_row = all_values[0]
+        if first_row != headers:
+            ws.insert_row(headers, 1)
+    except:
+        pass
+
+def get_or_create_worksheet(sheet, name, headers):
+    """Get worksheet by name or create if it doesn't exist"""
     try:
         ws = sheet.worksheet(name)
-        # Check if it needs headers (empty worksheet)
-        if ws.row_count == 0 or (len(ws.get_all_values()) == 0 and headers):
-            if headers:
-                ws.append_row(headers)
+        ensure_headers(ws, headers)
         return ws
     except:
         ws = sheet.add_worksheet(title=name, rows=1000, cols=20)
-        if headers:
-            ws.append_row(headers)
+        ws.append_row(headers)
         return ws
 
 def load_settings():
@@ -61,7 +76,8 @@ def load_settings():
         sheet = get_gsheet_client()
         if not sheet:
             return {}
-        ws = get_or_create_worksheet(sheet, "Settings")
+        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other']
+        ws = get_or_create_worksheet(sheet, "Settings", headers)
         data = ws.get_all_records()
         if data:
             return data[0]
@@ -120,7 +136,8 @@ def load_budgets():
         sheet = get_gsheet_client()
         if not sheet:
             return {}
-        ws = get_or_create_worksheet(sheet, "Budget")
+        headers = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
+        ws = get_or_create_worksheet(sheet, "Budget", headers)
         data = ws.get_all_records()
         if data:
             return data[0]
@@ -139,7 +156,6 @@ def save_debt_to_gsheet(debt):
         headers = ['name', 'principal', 'monthly_payment', 'interest_rate', 'months_to_payoff', 'created_date']
         ws = get_or_create_worksheet(sheet, "Debts", headers)
         
-        # Get headers and add row
         row = [
             debt.get('name', ''),
             debt.get('principal', ''),
@@ -165,8 +181,7 @@ def delete_debt_from_gsheet(debt_name):
         ws = get_or_create_worksheet(sheet, "Debts", headers)
         records = ws.get_all_records()
         
-        # Find and delete the row with matching name
-        for idx, record in enumerate(records, start=2):  # start=2 because row 1 is header
+        for idx, record in enumerate(records, start=2):
             if record.get('name') == debt_name:
                 ws.delete_rows(idx)
                 return True
@@ -186,7 +201,6 @@ def update_debt_in_gsheet(old_name, new_debt):
         ws = get_or_create_worksheet(sheet, "Debts", headers)
         records = ws.get_all_records()
         
-        # Find and update the row
         for idx, record in enumerate(records, start=2):
             if record.get('name') == old_name:
                 ws.update_values(f'A{idx}:F{idx}', [[
@@ -258,16 +272,13 @@ def save_settings_to_gsheet(settings):
         if not sheet:
             return False
         
-        ws = get_or_create_worksheet(sheet, "Settings")
+        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other']
+        ws = get_or_create_worksheet(sheet, "Settings", headers)
         
-        # Clear existing data
-        ws.clear()
+        all_rows = ws.get_all_values()
+        if len(all_rows) > 1:
+            ws.delete_rows(2, len(all_rows))
         
-        # Add header
-        headers = list(settings.keys())
-        ws.append_row(headers)
-        
-        # Add data
         values = [str(settings.get(k, '')) for k in headers]
         ws.append_row(values)
         return True
@@ -315,30 +326,6 @@ Be precise. Only output JSON."""
         st.error(f"Error: {str(e)}")
         return None
 
-def categorize_expense(receipt):
-    try:
-        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
-        merchant = receipt.get('merchant', '').lower()
-        items = [item.get('name', '').lower() for item in receipt.get('items', [])]
-        items_text = ', '.join(items[:3])
-        
-        prompt = f"""Categorize into ONE: Groceries, Dining, Transportation, Utilities, Entertainment, Shopping, Healthcare, Other
-Merchant: {merchant}
-Items: {items_text}
-Output ONLY category name."""
-        
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=20,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        
-        category = message.content[0].text.strip()
-        valid = ['Groceries', 'Dining', 'Transportation', 'Utilities', 'Entertainment', 'Shopping', 'Healthcare', 'Other']
-        return category if any(cat in category for cat in valid) else 'Other'
-    except:
-        return 'Other'
-
 def extract_health_report(image_bytes):
     """Extract health metrics from blood test report using Claude Vision"""
     try:
@@ -354,16 +341,10 @@ def extract_health_report(image_bytes):
             "value": 200,
             "unit": "mg/dL",
             "normal_range": "120-200"
-        },
-        {
-            "name": "Blood Sugar",
-            "value": 95,
-            "unit": "mg/dL",
-            "normal_range": "70-100"
         }
     ]
 }
-Extract EVERY metric shown in the report. Be precise with numbers and units."""
+Extract EVERY metric shown. Be precise with numbers and units."""
         
         message = client.messages.create(
             model="claude-opus-4-8",
@@ -388,6 +369,38 @@ Extract EVERY metric shown in the report. Be precise with numbers and units."""
     except Exception as e:
         st.error(f"Error extracting report: {str(e)}")
         return None
+
+def categorize_expense(receipt):
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        merchant = receipt.get('merchant', '').lower()
+        items = [item.get('name', '').lower() for item in receipt.get('items', [])]
+        items_text = ', '.join(items[:3])
+        
+        prompt = f"""Categorize into ONE: Groceries, Dining, Transportation, Utilities, Entertainment, Shopping, Healthcare, Other
+Merchant: {merchant}
+Items: {items_text}
+Output ONLY category name."""
+        
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=20,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        category = message.content[0].text.strip()
+        valid = ['Groceries', 'Dining', 'Transportation', 'Utilities', 'Entertainment', 'Shopping', 'Healthcare', 'Other']
+        return category if any(cat in category for cat in valid) else 'Other'
+    except:
+        return 'Other'
+
+def analyze_health_metrics(health_list):
+    """Analyze health metrics"""
+    if not health_list:
+        return None
+    
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
         
         latest = health_list[-1] if health_list else {}
         metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'added_at']])
@@ -412,6 +425,57 @@ Provide ONLY a JSON response with this structure:
         )
         
         return json.loads(message.content[0].text)
+    except:
+        return None
+
+def plot_health_trend(health_metrics, metric_name):
+    """Create trend chart for a health metric"""
+    data = [h for h in health_metrics if h.get('metric', '').lower() == metric_name.lower()]
+    
+    if len(data) < 2:
+        return None
+    
+    try:
+        df = pd.DataFrame(data)
+        df['date'] = pd.to_datetime(df['date'])
+        df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        df = df.dropna(subset=['value']).sort_values('date')
+        
+        if df.empty:
+            return None
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=df['date'],
+            y=df['value'],
+            mode='lines+markers',
+            name=metric_name,
+            line=dict(color='#1f77b4', width=2),
+            marker=dict(size=8)
+        ))
+        
+        normal_range = data[0].get('normal_range', '')
+        if normal_range and '-' in normal_range:
+            try:
+                min_val, max_val = normal_range.split('-')
+                min_val = float(min_val.strip())
+                max_val = float(max_val.strip())
+                
+                fig.add_hline(y=min_val, line_dash="dash", line_color="green", annotation_text="Normal Range")
+                fig.add_hline(y=max_val, line_dash="dash", line_color="green")
+            except:
+                pass
+        
+        fig.update_layout(
+            title=f"{metric_name} Trend Over Time",
+            xaxis_title="Date",
+            yaxis_title=f"{metric_name} ({data[0].get('unit', '')})",
+            hovermode='x unified',
+            height=400
+        )
+        
+        return fig
     except:
         return None
 
@@ -721,10 +785,10 @@ with tabs[3]:  # Wealth Dashboard
         st.success(f"🎯 **DEBT-FREE IN {max_months} MONTHS!** (Total debt: ${total_debt:.2f})")
 
 with tabs[4]:  # Health
-    st.markdown("### 🏥 Health Tracking & Analysis")
+    st.markdown("### 🏥 Health Tracking & Analysis with Trends")
     
-    st.markdown("#### 📄 OR Upload Health Report (Auto-Extract)")
-    uploaded_report = st.file_uploader("Upload Blood Test Report (PDF/Image)", type=["jpg", "jpeg", "png", "gif", "webp", "pdf"], key="health_report_upload")
+    st.markdown("#### 📄 Upload Health Report (Auto-Extract)")
+    uploaded_report = st.file_uploader("Upload Blood Test Report", type=["jpg", "jpeg", "png", "gif", "webp", "pdf"], key="health_report_upload")
     
     if uploaded_report:
         st.info("📊 Processing your health report...")
@@ -737,12 +801,10 @@ with tabs[4]:  # Health
                     test_date = extracted.get('test_date', str(datetime.now().date()))
                     metrics = extracted.get('metrics', [])
                     
-                    # Display extracted metrics
                     st.markdown("**Extracted Metrics:**")
                     for metric in metrics:
                         st.write(f"• **{metric.get('name')}**: {metric.get('value')} {metric.get('unit')} (Normal: {metric.get('normal_range')})")
                     
-                    # Auto-save all metrics
                     if st.button("💾 Save All Metrics to Google Sheets"):
                         saved_count = 0
                         for metric in metrics:
@@ -797,7 +859,7 @@ with tabs[4]:  # Health
                 st.session_state.health_metrics.append(health_entry)
                 st.success("✅ Health metric saved!")
     
-    st.markdown("#### 📈 Health Analysis")
+    st.markdown("#### 📈 Health Analysis & Trends")
     if st.session_state.health_metrics:
         latest_analysis = analyze_health_metrics(st.session_state.health_metrics)
         
@@ -814,6 +876,18 @@ with tabs[4]:  # Health
             st.markdown("**💡 Health Recommendations:**")
             for rec in latest_analysis.get('recommendations', []):
                 st.write(f"  • {rec}")
+        
+        st.markdown("#### 📊 Metric Trends Over Time")
+        unique_metrics = sorted(set(h.get('metric', '') for h in st.session_state.health_metrics))
+        
+        if unique_metrics:
+            selected_metric = st.selectbox("Select metric to view trend", unique_metrics)
+            fig = plot_health_trend(st.session_state.health_metrics, selected_metric)
+            
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Need at least 2 data points to show trend. Keep adding health metrics!")
         
         st.markdown("#### 📋 Your Metrics History")
         for metric in reversed(st.session_state.health_metrics[-10:]):
