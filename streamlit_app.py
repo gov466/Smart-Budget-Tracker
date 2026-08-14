@@ -40,12 +40,20 @@ def get_gsheet_client():
         st.info("Make sure Streamlit Secrets are set up correctly!")
         return None
 
-def get_or_create_worksheet(sheet, name):
-    """Get worksheet by name or create if it doesn't exist"""
+def get_or_create_worksheet(sheet, name, headers=None):
+    """Get worksheet by name or create if it doesn't exist, with headers"""
     try:
-        return sheet.worksheet(name)
+        ws = sheet.worksheet(name)
+        # Check if it needs headers (empty worksheet)
+        if ws.row_count == 0 or (len(ws.get_all_values()) == 0 and headers):
+            if headers:
+                ws.append_row(headers)
+        return ws
     except:
-        return sheet.add_worksheet(title=name, rows=1000, cols=20)
+        ws = sheet.add_worksheet(title=name, rows=1000, cols=20)
+        if headers:
+            ws.append_row(headers)
+        return ws
 
 def load_settings():
     """Load settings from Google Sheets"""
@@ -67,7 +75,8 @@ def load_expenses():
         sheet = get_gsheet_client()
         if not sheet:
             return []
-        ws = get_or_create_worksheet(sheet, "Expenses")
+        headers = ['merchant', 'date', 'total', 'category', 'uploaded_at']
+        ws = get_or_create_worksheet(sheet, "Expenses", headers)
         return ws.get_all_records()
     except:
         return []
@@ -78,7 +87,8 @@ def load_debts():
         sheet = get_gsheet_client()
         if not sheet:
             return []
-        ws = get_or_create_worksheet(sheet, "Debts")
+        headers = ['name', 'principal', 'monthly_payment', 'interest_rate', 'months_to_payoff', 'created_date']
+        ws = get_or_create_worksheet(sheet, "Debts", headers)
         records = ws.get_all_records()
         # Convert string numbers to float
         for record in records:
@@ -98,7 +108,8 @@ def load_health():
         sheet = get_gsheet_client()
         if not sheet:
             return []
-        ws = get_or_create_worksheet(sheet, "Health")
+        headers = ['date', 'metric', 'value', 'unit', 'normal_range', 'type', 'added_at']
+        ws = get_or_create_worksheet(sheet, "Health", headers)
         return ws.get_all_records()
     except:
         return []
@@ -125,7 +136,8 @@ def save_debt_to_gsheet(debt):
             st.error("Cannot connect to Google Sheets")
             return False
         
-        ws = get_or_create_worksheet(sheet, "Debts")
+        headers = ['name', 'principal', 'monthly_payment', 'interest_rate', 'months_to_payoff', 'created_date']
+        ws = get_or_create_worksheet(sheet, "Debts", headers)
         
         # Get headers and add row
         row = [
@@ -149,7 +161,8 @@ def delete_debt_from_gsheet(debt_name):
         if not sheet:
             return False
         
-        ws = get_or_create_worksheet(sheet, "Debts")
+        headers = ['name', 'principal', 'monthly_payment', 'interest_rate', 'months_to_payoff', 'created_date']
+        ws = get_or_create_worksheet(sheet, "Debts", headers)
         records = ws.get_all_records()
         
         # Find and delete the row with matching name
@@ -169,7 +182,8 @@ def update_debt_in_gsheet(old_name, new_debt):
         if not sheet:
             return False
         
-        ws = get_or_create_worksheet(sheet, "Debts")
+        headers = ['name', 'principal', 'monthly_payment', 'interest_rate', 'months_to_payoff', 'created_date']
+        ws = get_or_create_worksheet(sheet, "Debts", headers)
         records = ws.get_all_records()
         
         # Find and update the row
@@ -196,7 +210,8 @@ def save_expense_to_gsheet(expense):
         if not sheet:
             return False
         
-        ws = get_or_create_worksheet(sheet, "Expenses")
+        headers = ['merchant', 'date', 'total', 'category', 'uploaded_at']
+        ws = get_or_create_worksheet(sheet, "Expenses", headers)
         
         row = [
             expense.get('merchant', ''),
@@ -218,7 +233,8 @@ def save_health_to_gsheet(health_entry):
         if not sheet:
             return False
         
-        ws = get_or_create_worksheet(sheet, "Health")
+        headers = ['date', 'metric', 'value', 'unit', 'normal_range', 'type', 'added_at']
+        ws = get_or_create_worksheet(sheet, "Health", headers)
         
         row = [
             health_entry.get('date', ''),
@@ -226,6 +242,7 @@ def save_health_to_gsheet(health_entry):
             health_entry.get('value', ''),
             health_entry.get('unit', ''),
             health_entry.get('normal_range', ''),
+            health_entry.get('type', ''),
             health_entry.get('added_at', '')
         ]
         ws.append_row(row)
