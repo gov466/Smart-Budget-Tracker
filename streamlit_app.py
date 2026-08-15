@@ -302,7 +302,7 @@ def save_health_to_gsheet(health_entry):
         return False
 
 def save_settings_to_gsheet(settings):
-    """Save settings to Google Sheets"""
+    """Save settings to Google Sheets with safety checks"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
@@ -311,6 +311,13 @@ def save_settings_to_gsheet(settings):
         headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
         ws = get_or_create_worksheet(sheet, "Settings", headers)
         
+        # Validation: Check if we have meaningful data
+        salary_total = safe_float(settings.get('your_salary', 0)) + safe_float(settings.get('wife_salary', 0))
+        if salary_total == 0:
+            st.error("❌ Error: Salary is 0! Settings not saved to prevent data loss.")
+            return False
+        
+        # Keep only row 2 (headers in row 1)
         all_rows = ws.get_all_values()
         if len(all_rows) > 1:
             ws.delete_rows(2, len(all_rows))
@@ -684,6 +691,8 @@ tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "📊 Wealth", "�
 with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
     
+    st.warning("⚠️ **IMPORTANT:** Your settings data was accidentally deleted. Please re-enter your income and expenses below. Don't worry - we've added safety checks to prevent this happening again!")
+    
     st.markdown("#### 💵 Monthly Income")
     col1, col2 = st.columns(2)
     with col1:
@@ -733,20 +742,26 @@ with tabs[0]:  # Setup
     
     st.markdown(f"**Annual Total: ${sum(annual_values.values()):.2f}** → **Monthly Equivalent: ${monthly_equivalent:.2f}**")
     
-    if st.button("💾 Save Income & Fixed Expenses"):
-        st.session_state.settings['your_salary'] = your_sal
-        st.session_state.settings['wife_salary'] = wife_sal
-        for key, val in fixed_values.items():
-            st.session_state.settings[key] = val
-        for key, val in annual_values.items():
-            st.session_state.settings[key] = val
-        # Also save monthly equivalent of annual expenses
-        st.session_state.settings['annual_monthly_equivalent'] = monthly_equivalent
-        if save_settings_to_gsheet(st.session_state.settings):
-            st.success("✅ Saved to Google Sheets!")
-            st.info(f"📊 Your annual expenses ({sum(annual_values.values()):.2f}/year) add ${monthly_equivalent:.2f}/month to your budget")
+    if st.button("💾 Save Income & Fixed Expenses", key="save_settings_btn"):
+        # Validation
+        if your_sal == 0 and wife_sal == 0:
+            st.error("❌ Error: At least one salary must be greater than 0!")
         else:
-            st.error("❌ Error saving")
+            with st.spinner("Saving to Google Sheets..."):
+                st.session_state.settings['your_salary'] = your_sal
+                st.session_state.settings['wife_salary'] = wife_sal
+                for key, val in fixed_values.items():
+                    st.session_state.settings[key] = val
+                for key, val in annual_values.items():
+                    st.session_state.settings[key] = val
+                st.session_state.settings['annual_monthly_equivalent'] = monthly_equivalent
+                
+                if save_settings_to_gsheet(st.session_state.settings):
+                    st.success("✅ Saved to Google Sheets!")
+                    st.balloons()
+                    st.info(f"📊 Your annual expenses ({sum(annual_values.values()):.2f}/year) add ${monthly_equivalent:.2f}/month to your budget")
+                else:
+                    st.error("❌ Error saving - Settings NOT updated to prevent data loss")
 
 with tabs[1]:  # Debts
     st.markdown("### Debt Tracking & Management")
