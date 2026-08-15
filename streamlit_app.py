@@ -450,7 +450,9 @@ def analyze_grocery_health(items, health_metrics=None):
             health_text = "\n".join([f"- {m.get('metric', 'N/A')}: {m.get('value')} {m.get('unit')} (Normal: {m.get('normal_range')})" 
                                     for m in health_metrics[-5:]])  # Last 5 metrics
             
-            prompt = f"""You are a nutritionist. Analyze these groceries BASED ON THIS PERSON'S HEALTH.
+            prompt = f"""STRICT INSTRUCTIONS: Output ONLY valid JSON. No preamble, no explanation, ONLY JSON.
+
+You are a nutritionist. Analyze these groceries BASED ON THIS PERSON'S HEALTH.
 
 Their Health Metrics:
 {health_text}
@@ -459,16 +461,12 @@ Their Groceries:
 {items_text}
 
 For EACH grocery item, give:
-1. ✅ or ❌ or ⚠️ rating (based on their health)
-2. Why (how it affects their health)
+1. ✅ or ❌ or ⚠️ rating
+2. Why
 
-Then:
-3. Overall grocery grade (A to F)
-4. Top 3 items to KEEP
-5. Top 3 items to REDUCE or REPLACE
-6. Health-specific tips
+Then overall grade, keep items, reduce items, tips, and personalized note.
 
-Output ONLY valid JSON, nothing else:
+OUTPUT ONLY THIS JSON, NOTHING ELSE:
 {{
     "items_analysis": [
         {{"name": "Item", "rating": "✅", "reason": "why"}}
@@ -477,26 +475,24 @@ Output ONLY valid JSON, nothing else:
     "keep_items": ["item1", "item2"],
     "reduce_items": ["item1", "item2"],
     "tips": ["tip1", "tip2"],
-    "personalized_note": "Based on your health metrics..."
+    "personalized_note": "Based on your health..."
 }}"""
         else:
             # GENERIC mode - no health data
-            prompt = f"""You are a nutritionist. Analyze these groceries for GENERAL HEALTH.
+            prompt = f"""STRICT INSTRUCTIONS: Output ONLY valid JSON. No preamble, no explanation, ONLY JSON.
+
+You are a nutritionist. Analyze these groceries for GENERAL HEALTH.
 
 Groceries:
 {items_text}
 
 For EACH item, give:
-1. ✅ or ⚠️ rating (general health)
+1. ✅ or ⚠️ rating
 2. Why (nutritional value)
 
-Then:
-3. Overall grocery grade (A to F)
-4. Top healthy items
-5. Items to moderate
-6. General healthy eating tips
+Then overall grade, keep items, reduce items, tips.
 
-Output ONLY valid JSON, nothing else:
+OUTPUT ONLY THIS JSON, NOTHING ELSE:
 {{
     "items_analysis": [
         {{"name": "Item", "rating": "✅", "reason": "good source of fiber"}}
@@ -505,7 +501,7 @@ Output ONLY valid JSON, nothing else:
     "keep_items": ["item1", "item2"],
     "reduce_items": ["item1", "item2"],
     "tips": ["tip1", "tip2"],
-    "note": "Upload health reports for personalized recommendations!"
+    "note": "Upload health reports for personalized!"
 }}"""
         
         message = client.messages.create(
@@ -521,11 +517,22 @@ Output ONLY valid JSON, nothing else:
             st.error("❌ Empty response from Claude")
             return None
         
-        # Try to parse JSON
+        # Try to parse JSON - first try direct parse
         try:
             return json.loads(response_text)
         except json.JSONDecodeError:
-            st.error(f"❌ Invalid JSON response from Claude")
+            # Try to extract JSON from response (in case Claude added preamble)
+            try:
+                # Find JSON object in response
+                start_idx = response_text.find('{')
+                end_idx = response_text.rfind('}') + 1
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = response_text[start_idx:end_idx]
+                    return json.loads(json_str)
+            except:
+                pass
+            
+            st.error(f"❌ Invalid JSON response from Claude. Response: {response_text[:100]}")
             return None
             
     except Exception as e:
