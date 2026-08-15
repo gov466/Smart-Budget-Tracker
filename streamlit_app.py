@@ -288,7 +288,7 @@ def save_settings_to_gsheet(settings):
 
 def extract_receipt(image_bytes):
     try:
-        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
         image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
         
         prompt = """Extract receipt information. Output ONLY valid JSON.
@@ -329,7 +329,7 @@ Be precise. Only output JSON."""
 def extract_health_report(image_bytes):
     """Extract health metrics from blood test report using Claude Vision"""
     try:
-        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
         image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
         
         prompt = """Extract ALL health metrics from this blood test report. Output ONLY valid JSON.
@@ -372,7 +372,7 @@ Extract EVERY metric shown. Be precise with numbers and units."""
 
 def categorize_expense(receipt):
     try:
-        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
         merchant = receipt.get('merchant', '').lower()
         items = [item.get('name', '').lower() for item in receipt.get('items', [])]
         items_text = ', '.join(items[:3])
@@ -400,7 +400,7 @@ def analyze_health_metrics(health_list):
         return None
     
     try:
-        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
         
         latest = health_list[-1] if health_list else {}
         metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'added_at']])
