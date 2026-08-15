@@ -130,6 +130,11 @@ def load_debts():
         headers = ['name', 'principal', 'monthly_payment', 'interest_rate', 'months_to_payoff', 'created_date']
         ws = get_or_create_worksheet(sheet, "Debts", headers)
         records = ws.get_all_records()
+        
+        # Debug: show how many records we got
+        if len(records) == 0:
+            st.warning("⚠️ No debts loaded from Google Sheets. Check if headers are in row 1.")
+        
         # Convert string numbers to float
         for record in records:
             if 'principal' in record and record['principal']:
@@ -139,7 +144,8 @@ def load_debts():
             if 'interest_rate' in record and record['interest_rate']:
                 record['interest_rate'] = safe_float(record['interest_rate'])
         return records
-    except:
+    except Exception as e:
+        st.error(f"Error loading debts: {str(e)}")
         return []
 
 def load_health():
