@@ -517,11 +517,20 @@ OUTPUT ONLY THIS JSON, NOTHING ELSE:
             st.error("❌ Empty response from Claude")
             return None
         
+        # Remove markdown code blocks if present
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]  # Remove ```json
+        if response_text.startswith("```"):
+            response_text = response_text[3:]  # Remove ```
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]  # Remove closing ```
+        response_text = response_text.strip()
+        
         # Try to parse JSON - first try direct parse
         try:
             return json.loads(response_text)
         except json.JSONDecodeError:
-            # Try to extract JSON from response (in case Claude added preamble)
+            # Try to extract JSON from response (in case Claude added extra text)
             try:
                 # Find JSON object in response
                 start_idx = response_text.find('{')
@@ -532,7 +541,7 @@ OUTPUT ONLY THIS JSON, NOTHING ELSE:
             except:
                 pass
             
-            st.error(f"❌ Invalid JSON response from Claude. Response: {response_text[:100]}")
+            st.error(f"❌ Could not parse JSON. Try again!")
             return None
             
     except Exception as e:
