@@ -597,7 +597,7 @@ def calculate_monthly_finances(expenses, settings, debts):
                 pass
     
     # Add annual monthly equivalent
-    annual_monthly = safe_safe_float(settings.get('annual_monthly_equivalent', 0))
+    annual_monthly = safe_float(settings.get('annual_monthly_equivalent', 0))
     if annual_monthly > 0:
         fixed_expenses['Annual Expenses (Monthly Equivalent)'] = annual_monthly
         fixed_total += annual_monthly
@@ -802,7 +802,7 @@ with tabs[1]:  # Debts
                 with col2:
                     edit_principal = st.number_input("Principal", value=safe_float(debt.get('principal', 0)), key=f"edit_principal_{i}")
                 with col3:
-                    edit_payment = st.number_input("Monthly Payment", value=safe_safe_float(debt.get('monthly_payment', 0)), key=f"edit_payment_{i}")
+                    edit_payment = st.number_input("Monthly Payment", value=safe_float(debt.get('monthly_payment', 0)), key=f"edit_payment_{i}")
                 with col4:
                     edit_rate = st.number_input("Interest Rate %", value=safe_float(debt.get('interest_rate', 0)), key=f"edit_rate_{i}")
                 
