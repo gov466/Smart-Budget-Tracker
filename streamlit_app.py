@@ -506,47 +506,33 @@ OUTPUT ONLY THIS JSON, NOTHING ELSE:
         
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1000,
+            max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
         )
         
         response_text = message.content[0].text.strip()
         
-        # Debug: check if response is empty
-        if not response_text:
-            st.error("❌ Empty response from Claude")
-            return None
-        
         # Remove markdown code blocks if present
         if response_text.startswith("```json"):
-            response_text = response_text[7:]  # Remove ```json
+            response_text = response_text[7:]
         if response_text.startswith("```"):
-            response_text = response_text[3:]  # Remove ```
+            response_text = response_text[3:]
         if response_text.endswith("```"):
-            response_text = response_text[:-3]  # Remove closing ```
+            response_text = response_text[:-3]
         response_text = response_text.strip()
         
-        # Try to parse JSON - first try direct parse
+        # Try to parse JSON
         try:
             return json.loads(response_text)
         except json.JSONDecodeError:
-            # Try to extract JSON from response (in case Claude added extra text)
-            try:
-                # Find JSON object in response
-                start_idx = response_text.find('{')
-                end_idx = response_text.rfind('}') + 1
-                if start_idx != -1 and end_idx > start_idx:
-                    json_str = response_text[start_idx:end_idx]
-                    return json.loads(json_str)
-            except:
-                pass
-            
-            st.error(f"❌ Could not parse JSON. Try again!")
+            st.error("❌ Claude response not valid JSON. Try again!")
             return None
             
     except Exception as e:
         st.error(f"Error analyzing groceries: {str(e)}")
         return None
+
+def analyze_health_metrics(health_list):
     """Analyze health metrics"""
     if not health_list:
         return None
@@ -555,7 +541,7 @@ OUTPUT ONLY THIS JSON, NOTHING ELSE:
         client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
         
         latest = health_list[-1] if health_list else {}
-        metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'added_at']], f'A{idx}:F{idx}')
+        metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'added_at']])
         
         prompt = f"""Analyze these health metrics and provide brief assessment.
 
