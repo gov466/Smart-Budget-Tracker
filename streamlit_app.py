@@ -1027,11 +1027,12 @@ with tabs[3]:  # Wealth Dashboard
             difference = budget - actual
             st.write(f"• {cat}: ${actual:.2f}/${budget:.2f} {status} ({difference:+.2f})")
         
-        st.write(f"**Total: ${total_actual:.2f}/${total_budget:.2f}** ", end="")
+        # Total summary
         if total_actual <= total_budget:
-            st.write(f"✅ Under by ${total_budget - total_actual:.2f}")
+            total_message = f"**Total: ${total_actual:.2f}/${total_budget:.2f}** ✅ Under by ${total_budget - total_actual:.2f}"
         else:
-            st.write(f"⚠️ Over by ${total_actual - total_budget:.2f}")
+            total_message = f"**Total: ${total_actual:.2f}/${total_budget:.2f}** ⚠️ Over by ${total_actual - total_budget:.2f}"
+        st.write(total_message)
     else:
         st.info("Set monthly budgets in the Budgets tab to see comparison!")
 
