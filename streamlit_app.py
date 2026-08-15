@@ -76,7 +76,7 @@ def load_settings():
         sheet = get_gsheet_client()
         if not sheet:
             return {}
-        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other']
+        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
         ws = get_or_create_worksheet(sheet, "Settings", headers)
         data = ws.get_all_records()
         if data:
@@ -284,7 +284,7 @@ def save_settings_to_gsheet(settings):
         if not sheet:
             return False
         
-        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other']
+        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
         ws = get_or_create_worksheet(sheet, "Settings", headers)
         
         all_rows = ws.get_all_values()
@@ -589,6 +589,12 @@ def calculate_monthly_finances(expenses, settings, debts):
             except:
                 pass
     
+    # Add annual monthly equivalent
+    annual_monthly = float(settings.get('annual_monthly_equivalent', 0))
+    if annual_monthly > 0:
+        fixed_expenses['Annual Expenses (Monthly Equivalent)'] = annual_monthly
+        fixed_total += annual_monthly
+    
     debt_total = 0
     for debt in debts:
         try:
@@ -667,6 +673,7 @@ with tabs[0]:  # Setup
         'fixed_rent': 'Rent/Mortgage',
         'fixed_car_payment': 'Car Payment',
         'fixed_car_insurance': 'Car Insurance',
+        'fixed_health_insurance': 'Health Insurance',
         'fixed_mobile': 'Mobile/Phone',
         'fixed_utilities': 'Utilities (Hydro, Gas, Internet)',
         'fixed_groceries_budget': 'Groceries Budget',
@@ -680,13 +687,40 @@ with tabs[0]:  # Setup
     for key, label in fixed_items.items():
         fixed_values[key] = st.number_input(label, min_value=0.0, value=float(st.session_state.settings.get(key, 0)), step=50.0)
     
+    st.markdown("#### 📅 Annual/Yearly Expenses (Calculated Monthly Equivalent)")
+    st.info("💡 Enter yearly costs - we'll automatically calculate the monthly equivalent to add to your budget!")
+    
+    annual_items = {
+        'annual_costco': 'Costco Membership',
+        'annual_caa': 'CAA Membership',
+        'annual_car_registration': 'Car Registration/License Renewal',
+        'annual_gym': 'Gym/Fitness Membership (if annual)',
+        'annual_home_insurance': 'Home Insurance (annual premium)',
+        'annual_other': 'Other Annual Expense'
+    }
+    
+    annual_values = {}
+    monthly_equivalent = 0
+    
+    for key, label in annual_items.items():
+        annual_amount = st.number_input(f"{label} (yearly CAD)", min_value=0.0, value=float(st.session_state.settings.get(key, 0)), step=10.0)
+        annual_values[key] = annual_amount
+        monthly_equivalent += annual_amount / 12
+    
+    st.markdown(f"**Annual Total: ${sum(annual_values.values()):.2f}** → **Monthly Equivalent: ${monthly_equivalent:.2f}**")
+    
     if st.button("💾 Save Income & Fixed Expenses"):
         st.session_state.settings['your_salary'] = your_sal
         st.session_state.settings['wife_salary'] = wife_sal
         for key, val in fixed_values.items():
             st.session_state.settings[key] = val
+        for key, val in annual_values.items():
+            st.session_state.settings[key] = val
+        # Also save monthly equivalent of annual expenses
+        st.session_state.settings['annual_monthly_equivalent'] = monthly_equivalent
         if save_settings_to_gsheet(st.session_state.settings):
             st.success("✅ Saved to Google Sheets!")
+            st.info(f"📊 Your annual expenses ({sum(annual_values.values()):.2f}/year) add ${monthly_equivalent:.2f}/month to your budget")
         else:
             st.error("❌ Error saving")
 
