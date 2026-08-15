@@ -39,6 +39,8 @@ def safe_float(value, default=0.0):
         return float(value)
     except (ValueError, TypeError):
         return default
+
+def get_gsheet_client():
     """Connect to Google Sheets using credentials from Streamlit secrets"""
     try:
         creds = st.secrets["gsheet"]
