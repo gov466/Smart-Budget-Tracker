@@ -54,17 +54,26 @@ def ensure_headers(ws, headers):
     try:
         all_values = ws.get_all_values()
         
-        # If worksheet is empty, add headers
+        # If worksheet is completely empty, add headers
         if not all_values:
             ws.insert_row(headers, 1)
             return
         
-        # If first row doesn't match headers, insert headers at top
+        # Check if first row matches headers
         first_row = all_values[0]
+        
+        # If headers don't match, insert new headers at top
         if first_row != headers:
+            # Clear the sheet
+            if len(all_values) > 0:
+                # Insert headers at row 1
+                ws.insert_row(headers, 1)
+    except Exception as e:
+        # If any error, try to add headers anyway
+        try:
             ws.insert_row(headers, 1)
-    except:
-        pass
+        except:
+            pass
 
 def get_or_create_worksheet(sheet, name, headers):
     """Get worksheet by name or create if it doesn't exist"""
