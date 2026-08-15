@@ -334,7 +334,7 @@ def extract_receipt(image_bytes):
         client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
         image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
         
-        prompt = """Extract receipt information. Output ONLY valid JSON.
+        prompt = """Extract receipt information. Output ONLY valid JSON, no markdown, no preamble.
 {
     "merchant": "Store name",
     "date": "YYYY-MM-DD",
@@ -343,11 +343,11 @@ def extract_receipt(image_bytes):
     ],
     "total": 0.00
 }
-Be precise. Only output JSON."""
+Be precise. Extract every item. ONLY output JSON."""
         
         message = client.messages.create(
             model="claude-opus-4-8",
-            max_tokens=1000,
+            max_tokens=1500,
             messages=[{
                 "role": "user",
                 "content": [
@@ -364,7 +364,34 @@ Be precise. Only output JSON."""
             }],
         )
         
-        return json.loads(message.content[0].text)
+        response_text = message.content[0].text.strip()
+        
+        # Remove markdown code blocks if present
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+        
+        # Try to parse JSON
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            # Try to extract JSON from response
+            try:
+                start_idx = response_text.find('{')
+                end_idx = response_text.rfind('}') + 1
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = response_text[start_idx:end_idx]
+                    return json.loads(json_str)
+            except:
+                pass
+            
+            st.error("❌ Could not parse receipt. Try again!")
+            return None
+            
     except Exception as e:
         st.error(f"Error: {str(e)}")
         return None
@@ -375,7 +402,7 @@ def extract_health_report(image_bytes):
         client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
         image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
         
-        prompt = """Extract ALL health metrics from this blood test report. Output ONLY valid JSON.
+        prompt = """Extract ALL health metrics from this blood test report. Output ONLY valid JSON, no markdown, no preamble.
 {
     "test_date": "YYYY-MM-DD",
     "metrics": [
@@ -387,7 +414,7 @@ def extract_health_report(image_bytes):
         }
     ]
 }
-Extract EVERY metric shown. Be precise with numbers and units."""
+Extract EVERY metric shown. Be precise with numbers and units. ONLY output JSON."""
         
         message = client.messages.create(
             model="claude-opus-4-8",
@@ -408,7 +435,34 @@ Extract EVERY metric shown. Be precise with numbers and units."""
             }],
         )
         
-        return json.loads(message.content[0].text)
+        response_text = message.content[0].text.strip()
+        
+        # Remove markdown code blocks if present
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+        
+        # Try to parse JSON
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            # Try to extract JSON from response
+            try:
+                start_idx = response_text.find('{')
+                end_idx = response_text.rfind('}') + 1
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = response_text[start_idx:end_idx]
+                    return json.loads(json_str)
+            except:
+                pass
+            
+            st.error("❌ Could not parse health report. Try again!")
+            return None
+            
     except Exception as e:
         st.error(f"Error extracting report: {str(e)}")
         return None
@@ -562,7 +616,22 @@ Provide ONLY a JSON response with this structure:
             messages=[{"role": "user", "content": prompt}]
         )
         
-        return json.loads(message.content[0].text)
+        response_text = message.content[0].text.strip()
+        
+        # Remove markdown code blocks if present
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+        
+        # Try to parse JSON
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            return None
     except:
         return None
 
