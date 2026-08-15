@@ -691,7 +691,10 @@ tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "📊 Wealth", "�
 with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
     
-    st.warning("⚠️ **IMPORTANT:** Your settings data was accidentally deleted. Please re-enter your income and expenses below. Don't worry - we've added safety checks to prevent this happening again!")
+    # Only show warning if settings are actually empty
+    your_salary_current = safe_float(st.session_state.settings.get('your_salary', 0))
+    if your_salary_current == 0:
+        st.warning("⚠️ **IMPORTANT:** Your settings data is empty. Please re-enter your income and expenses below. We've added safety checks to prevent data loss!")
     
     st.markdown("#### 💵 Monthly Income")
     col1, col2 = st.columns(2)
