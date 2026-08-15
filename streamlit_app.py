@@ -91,9 +91,17 @@ def load_expenses():
         sheet = get_gsheet_client()
         if not sheet:
             return []
-        headers = ['merchant', 'date', 'total', 'category', 'uploaded_at']
+        headers = ['merchant', 'date', 'total', 'category', 'items', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Expenses", headers)
-        return ws.get_all_records()
+        records = ws.get_all_records()
+        # Parse items JSON if present
+        for record in records:
+            if 'items' in record and record['items']:
+                try:
+                    record['items'] = json.loads(record['items'])
+                except:
+                    record['items'] = []
+        return records
     except:
         return []
 
@@ -224,14 +232,18 @@ def save_expense_to_gsheet(expense):
         if not sheet:
             return False
         
-        headers = ['merchant', 'date', 'total', 'category', 'uploaded_at']
+        headers = ['merchant', 'date', 'total', 'category', 'items', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Expenses", headers)
+        
+        # Convert items list to JSON string
+        items_json = json.dumps(expense.get('items', []))
         
         row = [
             expense.get('merchant', ''),
             expense.get('date', ''),
             expense.get('total', ''),
             expense.get('category', ''),
+            items_json,
             expense.get('uploaded_at', '')
         ]
         ws.append_row(row)
@@ -394,7 +406,87 @@ Output ONLY category name."""
     except:
         return 'Other'
 
-def analyze_health_metrics(health_list):
+def analyze_grocery_health(items, health_metrics=None):
+    """Analyze groceries and give recommendations (generic or personalized)"""
+    try:
+        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+        
+        # Build item list
+        items_text = "\n".join([f"- {item.get('name', 'N/A')}" for item in items])
+        
+        if health_metrics:
+            # PERSONALIZED mode - with health data
+            health_text = "\n".join([f"- {m.get('metric', 'N/A')}: {m.get('value')} {m.get('unit')} (Normal: {m.get('normal_range')})" 
+                                    for m in health_metrics[-5:]])  # Last 5 metrics
+            
+            prompt = f"""You are a nutritionist. Analyze these groceries BASED ON THIS PERSON'S HEALTH.
+
+Their Health Metrics:
+{health_text}
+
+Their Groceries:
+{items_text}
+
+For EACH grocery item, give:
+1. ✅ or ❌ or ⚠️ rating (based on their health)
+2. Why (how it affects their health)
+
+Then:
+3. Overall grocery grade (A to F)
+4. Top 3 items to KEEP
+5. Top 3 items to REDUCE or REPLACE
+6. Health-specific tips
+
+Output ONLY valid JSON:
+{{
+    "items_analysis": [
+        {{"name": "Item", "rating": "✅", "reason": "why"}},
+    ],
+    "overall_grade": "B+",
+    "keep_items": ["item1", "item2"],
+    "reduce_items": ["item1", "item2"],
+    "tips": ["tip1", "tip2"],
+    "personalized_note": "Based on your high cholesterol..."
+}}"""
+        else:
+            # GENERIC mode - no health data
+            prompt = f"""You are a nutritionist. Analyze these groceries for GENERAL HEALTH.
+
+Groceries:
+{items_text}
+
+For EACH item, give:
+1. ✅ or ⚠️ rating (general health)
+2. Why (nutritional value)
+
+Then:
+3. Overall grocery grade (A to F)
+4. Top healthy items
+5. Items to moderate
+6. General healthy eating tips
+
+Output ONLY valid JSON:
+{{
+    "items_analysis": [
+        {{"name": "Item", "rating": "✅", "reason": "good source of fiber"}},
+    ],
+    "overall_grade": "B",
+    "keep_items": ["item1", "item2"],
+    "reduce_items": ["item1", "item2"],
+    "tips": ["tip1", "tip2"],
+    "note": "⚠️ Upload health reports for personalized recommendations!"
+}}"""
+        
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        return json.loads(message.content[0].text)
+    except Exception as e:
+        st.error(f"Error analyzing groceries: {str(e)}")
+        return None
     """Analyze health metrics"""
     if not health_list:
         return None
@@ -741,6 +833,14 @@ with tabs[2]:  # Spending
                             st.metric("Total", f"${receipt.get('total', 0):.2f}")
                         with col3:
                             st.metric("Category", category)
+                        
+                        st.markdown("#### 📋 Items Extracted:")
+                        items = receipt.get('items', [])
+                        if items:
+                            for item in items:
+                                st.write(f"• {item.get('name', 'N/A')} - Qty: {item.get('quantity', 1)}, Price: ${item.get('price', 0):.2f}")
+                        else:
+                            st.info("No items found in receipt")
                     else:
                         st.error("Error saving receipt to Google Sheets")
 
@@ -895,7 +995,77 @@ with tabs[4]:  # Health
 
 with tabs[5]:  # Smart Grocery
     st.markdown("### 🥗 Smart Grocery Recommendations")
-    st.info("📊 Add health metrics and upload grocery receipts to get personalized recommendations!")
+    
+    if st.session_state.expenses:
+        # Collect all grocery items
+        all_items = []
+        for expense in st.session_state.expenses:
+            items = expense.get('items', [])
+            if items:
+                all_items.extend(items)
+        
+        if all_items:
+            st.markdown("#### 📊 Analyzing Your Groceries...")
+            
+            # Check if health metrics exist
+            has_health_data = len(st.session_state.health_metrics) > 0
+            
+            if st.button("🤖 Get Smart Recommendations"):
+                with st.spinner("Analyzing your groceries..."):
+                    # If health data exists, use personalized mode
+                    if has_health_data:
+                        analysis = analyze_grocery_health(all_items, st.session_state.health_metrics)
+                        mode = "PERSONALIZED (based on your health)"
+                    else:
+                        analysis = analyze_grocery_health(all_items, None)
+                        mode = "GENERIC (general health guidelines)"
+                    
+                    if analysis:
+                        st.success(f"✅ Analysis Complete ({mode})")
+                        
+                        # Overall Grade
+                        grade = analysis.get('overall_grade', 'N/A')
+                        st.markdown(f"### 📈 Your Grocery Grade: **{grade}**")
+                        
+                        # Items Analysis
+                        st.markdown("#### 📋 Item Analysis:")
+                        for item_analysis in analysis.get('items_analysis', []):
+                            rating = item_analysis.get('rating', '?')
+                            name = item_analysis.get('name', 'Unknown')
+                            reason = item_analysis.get('reason', '')
+                            st.write(f"{rating} **{name}** - {reason}")
+                        
+                        # Keep Items
+                        st.markdown("#### ✅ Items to KEEP:")
+                        for item in analysis.get('keep_items', []):
+                            st.write(f"• {item}")
+                        
+                        # Reduce Items
+                        st.markdown("#### ⚠️ Items to REDUCE or REPLACE:")
+                        for item in analysis.get('reduce_items', []):
+                            st.write(f"• {item}")
+                        
+                        # Tips
+                        st.markdown("#### 💡 Tips:")
+                        for tip in analysis.get('tips', []):
+                            st.write(f"• {tip}")
+                        
+                        # Note
+                        note = analysis.get('personalized_note') or analysis.get('note', '')
+                        if note:
+                            if has_health_data:
+                                st.info(f"📊 {note}")
+                            else:
+                                st.warning(f"⚠️ {note}")
+                        
+                        # Encourage health reports if not present
+                        if not has_health_data:
+                            st.markdown("---")
+                            st.success("💪 **Tip:** Upload health reports to get PERSONALIZED recommendations based on YOUR health metrics!")
+        else:
+            st.info("📸 No grocery items found. Upload receipts first to get recommendations!")
+    else:
+        st.info("📸 No grocery data. Upload receipts to get smart recommendations!")
 
 with tabs[6]:  # Budgets
     st.markdown("### 🎯 Set Monthly Budgets")
