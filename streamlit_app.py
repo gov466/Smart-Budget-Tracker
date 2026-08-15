@@ -31,7 +31,14 @@ import plotly.express as px
 # Google Sheets configuration
 SPREADSHEET_ID = "1tzRTNtq3N-QPabBSowhmzYXuxHR9bimvYTn1z0wjuQs"
 
-def get_gsheet_client():
+def safe_float(value, default=0.0):
+    """Safely convert value to float, handling empty strings and None"""
+    try:
+        if value is None or value == '' or value == 'None':
+            return default
+        return float(value)
+    except (ValueError, TypeError):
+        return default
     """Connect to Google Sheets using credentials from Streamlit secrets"""
     try:
         creds = st.secrets["gsheet"]
@@ -117,11 +124,11 @@ def load_debts():
         # Convert string numbers to float
         for record in records:
             if 'principal' in record and record['principal']:
-                record['principal'] = float(record['principal'])
+                record['principal'] = safe_float(record['principal'])
             if 'monthly_payment' in record and record['monthly_payment']:
-                record['monthly_payment'] = float(record['monthly_payment'])
+                record['monthly_payment'] = safe_float(record['monthly_payment'])
             if 'interest_rate' in record and record['interest_rate']:
-                record['interest_rate'] = float(record['interest_rate'])
+                record['interest_rate'] = safe_float(record['interest_rate'])
         return records
     except:
         return []
@@ -530,7 +537,7 @@ def plot_health_trend(health_metrics, metric_name):
     try:
         df = pd.DataFrame(data)
         df['date'] = pd.to_datetime(df['date'])
-        df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        df['value'] = df['value'].apply(lambda x: safe_float(x))
         df = df.dropna(subset=['value']).sort_values('date')
         
         if df.empty:
@@ -551,8 +558,8 @@ def plot_health_trend(health_metrics, metric_name):
         if normal_range and '-' in normal_range:
             try:
                 min_val, max_val = normal_range.split('-')
-                min_val = float(min_val.strip())
-                max_val = float(max_val.strip())
+                min_val = safe_float(min_val.strip())
+                max_val = safe_float(max_val.strip())
                 
                 fig.add_hline(y=min_val, line_dash="dash", line_color="green", annotation_text="Normal Range")
                 fig.add_hline(y=max_val, line_dash="dash", line_color="green")
@@ -573,8 +580,8 @@ def plot_health_trend(health_metrics, metric_name):
 
 def calculate_monthly_finances(expenses, settings, debts):
     """Calculate complete monthly financial overview"""
-    your_salary = float(settings.get('your_salary', 0))
-    wife_salary = float(settings.get('wife_salary', 0))
+    your_salary = safe_float(settings.get('your_salary', 0))
+    wife_salary = safe_float(settings.get('wife_salary', 0))
     total_income = your_salary + wife_salary
     
     fixed_expenses = {}
@@ -590,7 +597,7 @@ def calculate_monthly_finances(expenses, settings, debts):
                 pass
     
     # Add annual monthly equivalent
-    annual_monthly = float(settings.get('annual_monthly_equivalent', 0))
+    annual_monthly = safe_safe_float(settings.get('annual_monthly_equivalent', 0))
     if annual_monthly > 0:
         fixed_expenses['Annual Expenses (Monthly Equivalent)'] = annual_monthly
         fixed_total += annual_monthly
@@ -598,7 +605,7 @@ def calculate_monthly_finances(expenses, settings, debts):
     debt_total = 0
     for debt in debts:
         try:
-            debt_total += float(debt.get('monthly_payment', 0))
+            debt_total += safe_float(debt.get('monthly_payment', 0))
         except:
             pass
     
@@ -611,7 +618,7 @@ def calculate_monthly_finances(expenses, settings, debts):
         try:
             exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
             if exp_date >= month_start:
-                amt = float(exp.get('total', 0))
+                amt = safe_float(exp.get('total', 0))
                 variable_total += amt
                 cat = exp.get('category', 'Other')
                 variable_by_category[cat] += amt
@@ -663,9 +670,9 @@ with tabs[0]:  # Setup
     st.markdown("#### 💵 Monthly Income")
     col1, col2 = st.columns(2)
     with col1:
-        your_sal = st.number_input("Your Salary (CAD)", min_value=0.0, value=float(st.session_state.settings.get('your_salary', 0)), step=100.0)
+        your_sal = st.number_input("Your Salary (CAD)", min_value=0.0, value=safe_float(st.session_state.settings.get('your_salary', 0)), step=100.0)
     with col2:
-        wife_sal = st.number_input("Wife's Salary (CAD)", min_value=0.0, value=float(st.session_state.settings.get('wife_salary', 0)), step=100.0)
+        wife_sal = st.number_input("Wife's Salary (CAD)", min_value=0.0, value=safe_float(st.session_state.settings.get('wife_salary', 0)), step=100.0)
     
     st.markdown("#### 🏠 Fixed Monthly Expenses")
     
@@ -685,7 +692,7 @@ with tabs[0]:  # Setup
     
     fixed_values = {}
     for key, label in fixed_items.items():
-        fixed_values[key] = st.number_input(label, min_value=0.0, value=float(st.session_state.settings.get(key, 0)), step=50.0)
+        fixed_values[key] = st.number_input(label, min_value=0.0, value=safe_float(st.session_state.settings.get(key, 0)), step=50.0)
     
     st.markdown("#### 📅 Annual/Yearly Expenses (Calculated Monthly Equivalent)")
     st.info("💡 Enter yearly costs - we'll automatically calculate the monthly equivalent to add to your budget!")
@@ -703,7 +710,7 @@ with tabs[0]:  # Setup
     monthly_equivalent = 0
     
     for key, label in annual_items.items():
-        annual_amount = st.number_input(f"{label} (yearly CAD)", min_value=0.0, value=float(st.session_state.settings.get(key, 0)), step=10.0)
+        annual_amount = st.number_input(f"{label} (yearly CAD)", min_value=0.0, value=safe_float(st.session_state.settings.get(key, 0)), step=10.0)
         annual_values[key] = annual_amount
         monthly_equivalent += annual_amount / 12
     
@@ -793,11 +800,11 @@ with tabs[1]:  # Debts
                 with col1:
                     edit_name = st.text_input("Debt Name", value=debt.get('name', ''), key=f"edit_name_{i}")
                 with col2:
-                    edit_principal = st.number_input("Principal", value=float(debt.get('principal', 0)), key=f"edit_principal_{i}")
+                    edit_principal = st.number_input("Principal", value=safe_float(debt.get('principal', 0)), key=f"edit_principal_{i}")
                 with col3:
-                    edit_payment = st.number_input("Monthly Payment", value=float(debt.get('monthly_payment', 0)), key=f"edit_payment_{i}")
+                    edit_payment = st.number_input("Monthly Payment", value=safe_safe_float(debt.get('monthly_payment', 0)), key=f"edit_payment_{i}")
                 with col4:
-                    edit_rate = st.number_input("Interest Rate %", value=float(debt.get('interest_rate', 0)), key=f"edit_rate_{i}")
+                    edit_rate = st.number_input("Interest Rate %", value=safe_float(debt.get('interest_rate', 0)), key=f"edit_rate_{i}")
                 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -822,8 +829,8 @@ with tabs[1]:  # Debts
                         st.rerun()
             
             try:
-                total_debt += float(debt.get('principal', 0))
-                total_monthly_payment += float(debt.get('monthly_payment', 0))
+                total_debt += safe_float(debt.get('principal', 0))
+                total_monthly_payment += safe_float(debt.get('monthly_payment', 0))
             except:
                 pass
         
@@ -914,7 +921,7 @@ with tabs[3]:  # Wealth Dashboard
             st.write(f"• {debt.get('name', 'N/A')}: ${debt.get('monthly_payment', 0):.2f}")
         st.write(f"**Subtotal: ${finances['debt_payments']:.2f}**")
         
-        total_debt = sum(float(d.get('principal', 0)) for d in st.session_state.debts)
+        total_debt = sum(safe_float(d.get('principal', 0)) for d in st.session_state.debts)
         max_months = max([d.get('months_to_payoff', 0) for d in st.session_state.debts], default=0)
         st.success(f"🎯 **DEBT-FREE IN {max_months} MONTHS!** (Total debt: ${total_debt:.2f})")
 
@@ -1108,7 +1115,7 @@ with tabs[6]:  # Budgets
     
     for cat in categories:
         current = st.session_state.budgets.get(cat, 0)
-        budget = st.number_input(f"{cat} Budget (CAD)", min_value=0.0, value=float(current), step=10.0)
+        budget = st.number_input(f"{cat} Budget (CAD)", min_value=0.0, value=safe_float(current), step=10.0)
         st.session_state.budgets[cat] = budget
     
     if st.button("💾 Save Budgets"):
