@@ -448,7 +448,7 @@ def analyze_grocery_health(items, health_metrics=None):
         if health_metrics:
             # PERSONALIZED mode - with health data
             health_text = "\n".join([f"- {m.get('metric', 'N/A')}: {m.get('value')} {m.get('unit')} (Normal: {m.get('normal_range')})" 
-                                    for m in health_metrics[-5:]], f'A{idx}:F{idx}')  # Last 5 metrics
+                                    for m in health_metrics[-5:]])  # Last 5 metrics
             
             prompt = f"""You are a nutritionist. Analyze these groceries BASED ON THIS PERSON'S HEALTH.
 
@@ -468,16 +468,16 @@ Then:
 5. Top 3 items to REDUCE or REPLACE
 6. Health-specific tips
 
-Output ONLY valid JSON:
+Output ONLY valid JSON, nothing else:
 {{
     "items_analysis": [
-        {{"name": "Item", "rating": "✅", "reason": "why"}},
+        {{"name": "Item", "rating": "✅", "reason": "why"}}
     ],
     "overall_grade": "B+",
     "keep_items": ["item1", "item2"],
     "reduce_items": ["item1", "item2"],
     "tips": ["tip1", "tip2"],
-    "personalized_note": "Based on your high cholesterol..."
+    "personalized_note": "Based on your health metrics..."
 }}"""
         else:
             # GENERIC mode - no health data
@@ -496,16 +496,16 @@ Then:
 5. Items to moderate
 6. General healthy eating tips
 
-Output ONLY valid JSON:
+Output ONLY valid JSON, nothing else:
 {{
     "items_analysis": [
-        {{"name": "Item", "rating": "✅", "reason": "good source of fiber"}},
+        {{"name": "Item", "rating": "✅", "reason": "good source of fiber"}}
     ],
     "overall_grade": "B",
     "keep_items": ["item1", "item2"],
     "reduce_items": ["item1", "item2"],
     "tips": ["tip1", "tip2"],
-    "note": "⚠️ Upload health reports for personalized recommendations!"
+    "note": "Upload health reports for personalized recommendations!"
 }}"""
         
         message = client.messages.create(
@@ -514,7 +514,20 @@ Output ONLY valid JSON:
             messages=[{"role": "user", "content": prompt}]
         )
         
-        return json.loads(message.content[0].text)
+        response_text = message.content[0].text.strip()
+        
+        # Debug: check if response is empty
+        if not response_text:
+            st.error("❌ Empty response from Claude")
+            return None
+        
+        # Try to parse JSON
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            st.error(f"❌ Invalid JSON response from Claude")
+            return None
+            
     except Exception as e:
         st.error(f"Error analyzing groceries: {str(e)}")
         return None
