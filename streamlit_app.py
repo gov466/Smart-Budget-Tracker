@@ -211,14 +211,14 @@ def update_debt_in_gsheet(old_name, new_debt):
         
         for idx, record in enumerate(records, start=2):
             if record.get('name') == old_name:
-                ws.update_values(f'A{idx}:F{idx}', [[
+                ws.update([[
                     new_debt.get('name', ''),
                     new_debt.get('principal', ''),
                     new_debt.get('monthly_payment', ''),
                     new_debt.get('interest_rate', ''),
                     new_debt.get('months_to_payoff', ''),
                     new_debt.get('created_date', '')
-                ]])
+                ]], f'A{idx}:F{idx}')
                 return True
         return False
     except Exception as e:
@@ -417,7 +417,7 @@ def analyze_grocery_health(items, health_metrics=None):
         if health_metrics:
             # PERSONALIZED mode - with health data
             health_text = "\n".join([f"- {m.get('metric', 'N/A')}: {m.get('value')} {m.get('unit')} (Normal: {m.get('normal_range')})" 
-                                    for m in health_metrics[-5:]])  # Last 5 metrics
+                                    for m in health_metrics[-5:]], f'A{idx}:F{idx}')  # Last 5 metrics
             
             prompt = f"""You are a nutritionist. Analyze these groceries BASED ON THIS PERSON'S HEALTH.
 
@@ -495,7 +495,7 @@ Output ONLY valid JSON:
         client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
         
         latest = health_list[-1] if health_list else {}
-        metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'added_at']])
+        metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'added_at']], f'A{idx}:F{idx}')
         
         prompt = f"""Analyze these health metrics and provide brief assessment.
 
