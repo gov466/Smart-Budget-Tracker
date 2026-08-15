@@ -905,7 +905,94 @@ with tabs[2]:  # Spending
 with tabs[3]:  # Wealth Dashboard
     st.markdown("### 📊 Complete Financial Dashboard")
     
-    finances = calculate_monthly_finances(st.session_state.expenses, st.session_state.settings, st.session_state.debts)
+    # Month selector
+    st.markdown("#### 📅 Select Month to View")
+    col1, col2 = st.columns([2, 3])
+    
+    # Get all unique months from expenses
+    all_months = set()
+    for exp in st.session_state.expenses:
+        try:
+            exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
+            month_key = exp_date.strftime('%Y-%m')
+            all_months.add(month_key)
+        except:
+            pass
+    
+    # Add current month
+    today = datetime.now()
+    current_month = today.strftime('%Y-%m')
+    all_months.add(current_month)
+    
+    # Sort months descending
+    months_sorted = sorted(list(all_months), reverse=True)
+    month_labels = [datetime.strptime(m, '%Y-%m').strftime('%B %Y') for m in months_sorted]
+    
+    with col1:
+        selected_month_label = st.selectbox("Choose Month:", month_labels, key="month_selector")
+        selected_month = months_sorted[month_labels.index(selected_month_label)]
+    
+    # Calculate finances for selected month
+    def calculate_monthly_finances_for_month(expenses, settings, debts, target_month):
+        """Calculate finances for a specific month"""
+        your_salary = safe_float(settings.get('your_salary', 0))
+        wife_salary = safe_float(settings.get('wife_salary', 0))
+        total_income = your_salary + wife_salary
+        
+        fixed_expenses = {}
+        fixed_total = 0
+        for key in settings:
+            if key.startswith('fixed_'):
+                try:
+                    amount = safe_float(settings[key])
+                    expense_name = key.replace('fixed_', '').replace('_', ' ').title()
+                    fixed_expenses[expense_name] = amount
+                    fixed_total += amount
+                except:
+                    pass
+        
+        # Add annual monthly equivalent
+        annual_monthly = safe_float(settings.get('annual_monthly_equivalent', 0))
+        if annual_monthly > 0:
+            fixed_expenses['Annual Expenses (Monthly Equivalent)'] = annual_monthly
+            fixed_total += annual_monthly
+        
+        debt_total = 0
+        for debt in debts:
+            try:
+                debt_total += safe_float(debt.get('monthly_payment', 0))
+            except:
+                pass
+        
+        # Filter expenses for selected month
+        variable_total = 0
+        variable_by_category = defaultdict(float)
+        for exp in expenses:
+            try:
+                exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
+                exp_month = exp_date.strftime('%Y-%m')
+                if exp_month == target_month:
+                    amt = safe_float(exp.get('total', 0))
+                    variable_total += amt
+                    cat = exp.get('category', 'Other')
+                    variable_by_category[cat] += amt
+            except:
+                pass
+        
+        return {
+            'your_salary': your_salary,
+            'wife_salary': wife_salary,
+            'total_income': total_income,
+            'fixed_expenses': fixed_expenses,
+            'fixed_total': fixed_total,
+            'debt_payments': debt_total,
+            'variable_total': variable_total,
+            'variable_by_category': dict(variable_by_category),
+            'available_after_fixed_debt': total_income - fixed_total - debt_total,
+            'remaining': total_income - fixed_total - debt_total - variable_total
+        }
+    
+    finances = calculate_monthly_finances_for_month(st.session_state.expenses, st.session_state.settings, st.session_state.debts, selected_month)
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -1035,6 +1122,69 @@ with tabs[3]:  # Wealth Dashboard
         st.write(total_message)
     else:
         st.info("Set monthly budgets in the Budgets tab to see comparison!")
+    
+    st.markdown("---")
+    
+    # NEW: Historical Spending Trends
+    st.markdown("#### 📈 Spending Trends Over Time (All Months)")
+    
+    # Build historical data by month and category
+    historical_data = defaultdict(lambda: defaultdict(float))
+    for exp in st.session_state.expenses:
+        try:
+            exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
+            month_key = exp_date.strftime('%Y-%m')
+            cat = exp.get('category', 'Other')
+            amt = safe_float(exp.get('total', 0))
+            historical_data[month_key][cat] += amt
+        except:
+            pass
+    
+    if historical_data:
+        # Sort months
+        months_sorted_hist = sorted(list(historical_data.keys()))
+        
+        # Create line chart with multiple categories
+        fig_trend = go.Figure()
+        
+        # Get all unique categories across all months
+        all_categories_hist = set()
+        for month_data in historical_data.values():
+            all_categories_hist.update(month_data.keys())
+        
+        # Add a line for each category
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+        for idx, cat in enumerate(sorted(all_categories_hist)):
+            values = [historical_data[month].get(cat, 0) for month in months_sorted_hist]
+            month_labels_hist = [datetime.strptime(m, '%Y-%m').strftime('%b %Y') for m in months_sorted_hist]
+            
+            fig_trend.add_trace(go.Scatter(
+                x=month_labels_hist,
+                y=values,
+                mode='lines+markers',
+                name=cat,
+                line=dict(width=2, color=colors[idx % len(colors)]),
+                marker=dict(size=8)
+            ))
+        
+        fig_trend.update_layout(
+            title="Monthly Spending by Category",
+            xaxis_title="Month",
+            yaxis_title="Spending ($)",
+            hovermode='x unified',
+            height=400
+        )
+        st.plotly_chart(fig_trend, use_container_width=True)
+        
+        # Summary table
+        st.markdown("**Monthly Summary:**")
+        summary_df = pd.DataFrame({
+            'Month': [datetime.strptime(m, '%Y-%m').strftime('%B %Y') for m in months_sorted_hist],
+            'Total Spending': [sum(historical_data[m].values()) for m in months_sorted_hist]
+        })
+        st.dataframe(summary_df, use_container_width=True)
+    else:
+        st.info("No historical spending data yet. Upload receipts to see trends!")
 
 with tabs[4]:  # Health
     st.markdown("### 🏥 Health Tracking & Analysis with Trends")
