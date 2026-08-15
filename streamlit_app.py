@@ -939,8 +939,101 @@ with tabs[3]:  # Wealth Dashboard
         st.write(f"**Subtotal: ${finances['debt_payments']:.2f}**")
         
         total_debt = sum(safe_float(d.get('principal', 0)) for d in st.session_state.debts)
-        max_months = max([d.get('months_to_payoff', 0) for d in st.session_state.debts], default=0)
-        st.success(f"🎯 **DEBT-FREE IN {max_months} MONTHS!** (Total debt: ${total_debt:.2f})")
+        max_months = max([safe_float(d.get('months_to_payoff', 0)) for d in st.session_state.debts], default=0)
+        st.success(f"🎯 **DEBT-FREE IN {int(max_months)} MONTHS!** (Total debt: ${total_debt:.2f})")
+    
+    st.markdown("---")
+    
+    # NEW: Category Spending Breakdown
+    st.markdown("#### 📊 Spending by Category (This Month)")
+    if finances['variable_by_category']:
+        categories = finances['variable_by_category']
+        
+        # Pie chart
+        fig_pie = go.Figure(data=[go.Pie(
+            labels=list(categories.keys()),
+            values=list(categories.values()),
+            hole=0
+        )])
+        fig_pie.update_layout(height=400, showlegend=True)
+        st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Category breakdown table
+        st.markdown("**Category Breakdown:**")
+        for cat, amount in sorted(categories.items(), key=lambda x: x[1], reverse=True):
+            st.write(f"• {cat}: **${amount:.2f}**")
+    else:
+        st.info("No spending data yet. Upload receipts to see category breakdown!")
+    
+    st.markdown("---")
+    
+    # NEW: Debt Payoff Timeline
+    st.markdown("#### 🎯 Debt Payoff Timeline")
+    if st.session_state.debts:
+        debts_sorted = sorted(st.session_state.debts, key=lambda x: safe_float(x.get('months_to_payoff', 0)))
+        
+        for debt in debts_sorted:
+            name = debt.get('name', 'N/A')
+            months = int(safe_float(debt.get('months_to_payoff', 0)))
+            principal = safe_float(debt.get('principal', 0))
+            
+            # Progress bar (0-100 based on months)
+            progress = min(100, (months / 100) * 100)  # Scale months to 0-100
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write(f"**{name}**")
+                st.progress(progress / 100)
+            with col2:
+                st.write(f"**{months}mo**")
+                st.write(f"${principal:.0f}")
+    else:
+        st.info("No debts tracked. Add debts to see payoff timeline!")
+    
+    st.markdown("---")
+    
+    # NEW: Budget vs Actual Comparison
+    st.markdown("#### 💰 Budget vs Actual (This Month)")
+    if st.session_state.budgets:
+        budget_categories = {}
+        actual_categories = finances['variable_by_category']
+        
+        for cat in st.session_state.budgets:
+            budget_amount = safe_float(st.session_state.budgets.get(cat, 0))
+            actual_amount = actual_categories.get(cat, 0)
+            budget_categories[cat] = {'budget': budget_amount, 'actual': actual_amount}
+        
+        # Comparison chart
+        categories_list = list(budget_categories.keys())
+        budget_values = [budget_categories[cat]['budget'] for cat in categories_list]
+        actual_values = [budget_categories[cat]['actual'] for cat in categories_list]
+        
+        fig_budget = go.Figure(data=[
+            go.Bar(name='Budget', x=categories_list, y=budget_values, marker_color='lightblue'),
+            go.Bar(name='Actual', x=categories_list, y=actual_values, marker_color='coral')
+        ])
+        fig_budget.update_layout(barmode='group', height=400)
+        st.plotly_chart(fig_budget, use_container_width=True)
+        
+        # Budget status
+        st.markdown("**Budget Status:**")
+        total_budget = sum(budget_values)
+        total_actual = sum(actual_values)
+        
+        for cat in categories_list:
+            budget = budget_categories[cat]['budget']
+            actual = budget_categories[cat]['actual']
+            status = "✅ Under" if actual <= budget else "⚠️ Over"
+            difference = budget - actual
+            st.write(f"• {cat}: ${actual:.2f}/${budget:.2f} {status} ({difference:+.2f})")
+        
+        st.write(f"**Total: ${total_actual:.2f}/${total_budget:.2f}** ", end="")
+        if total_actual <= total_budget:
+            st.write(f"✅ Under by ${total_budget - total_actual:.2f}")
+        else:
+            st.write(f"⚠️ Over by ${total_actual - total_budget:.2f}")
+    else:
+        st.info("Set monthly budgets in the Budgets tab to see comparison!")
 
 with tabs[4]:  # Health
     st.markdown("### 🏥 Health Tracking & Analysis with Trends")
