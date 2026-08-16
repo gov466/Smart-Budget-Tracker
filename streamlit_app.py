@@ -156,7 +156,7 @@ def load_health():
         sheet = get_gsheet_client()
         if not sheet:
             return []
-        headers = ['date', 'metric', 'value', 'unit', 'normal_range', 'type', 'added_at']
+        headers = ['date', 'metric', 'value', 'unit', 'normal_range', 'type', 'person', 'added_at']
         ws = get_or_create_worksheet(sheet, "Health", headers)
         return ws.get_all_records()
     except:
@@ -283,7 +283,7 @@ def save_health_to_gsheet(health_entry):
         if not sheet:
             return False
         
-        headers = ['date', 'metric', 'value', 'unit', 'normal_range', 'type', 'added_at']
+        headers = ['date', 'metric', 'value', 'unit', 'normal_range', 'type', 'person', 'added_at']
         ws = get_or_create_worksheet(sheet, "Health", headers)
         
         row = [
@@ -293,6 +293,7 @@ def save_health_to_gsheet(health_entry):
             health_entry.get('unit', ''),
             health_entry.get('normal_range', ''),
             health_entry.get('type', ''),
+            health_entry.get('person', 'Govind'),
             health_entry.get('added_at', '')
         ]
         ws.append_row(row)
@@ -586,7 +587,82 @@ OUTPUT ONLY THIS JSON, NOTHING ELSE:
         st.error(f"Error analyzing groceries: {str(e)}")
         return None
 
-def analyze_health_metrics(health_list):
+def analyze_joint_health(health_metrics_govind, health_metrics_amrithavarshini):
+    """Analyze both people's health together and give household recommendations"""
+    if not health_metrics_govind or not health_metrics_amrithavarshini:
+        return None
+    
+    try:
+        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+        
+        # Get latest metrics for each person
+        govind_latest = health_metrics_govind[-1] if health_metrics_govind else {}
+        amritha_latest = health_metrics_amrithavarshini[-1] if health_metrics_amrithavarshini else {}
+        
+        govind_text = '\n'.join([f"- {m.get('metric', 'N/A')}: {m.get('value')} {m.get('unit')} (Normal: {m.get('normal_range')})" 
+                               for m in health_metrics_govind[-5:]])
+        amritha_text = '\n'.join([f"- {m.get('metric', 'N/A')}: {m.get('value')} {m.get('unit')} (Normal: {m.get('normal_range')})" 
+                                for m in health_metrics_amrithavarshini[-5:]])
+        
+        prompt = f"""You are a nutritionist helping a couple cook and eat healthy TOGETHER.
+
+GOVIND's Health Metrics (last 5):
+{govind_text}
+
+AMRITHAVARSHINI's Health Metrics (last 5):
+{amritha_text}
+
+Analyze their health TOGETHER and provide household-friendly recommendations since they cook together.
+
+Output ONLY valid JSON, nothing else:
+{{
+    "common_concerns": ["High cholesterol (both)", "Need to increase fiber"],
+    "individual_flags": {{
+        "govind": ["Flag 1"],
+        "amrithavarshini": ["Flag 1"]
+    }},
+    "household_diet_goals": [
+        "Goal 1 (benefits both)",
+        "Goal 2"
+    ],
+    "keep_foods": ["Salmon (omega-3s help both)", "Broccoli (fiber for both)"],
+    "reduce_foods": ["Fried foods (bad for both)", "High-salt items"],
+    "household_meal_tips": [
+        "Prepare grilled meals instead of fried",
+        "Use olive oil for cooking",
+        "Add herbs for flavor instead of salt"
+    ],
+    "cooking_together_advice": "Cook once, eat together! Focus on grilled/baked meals with lots of vegetables.",
+    "household_grocery_grade": "A-",
+    "summary": "Your household should focus on heart-healthy eating since both have cholesterol concerns..."
+}}"""
+        
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        response_text = message.content[0].text.strip()
+        
+        # Remove markdown code blocks if present
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+        
+        # Try to parse JSON
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            return None
+            
+    except Exception as e:
+        st.error(f"Error analyzing joint health: {str(e)}")
+        return None
     """Analyze health metrics"""
     if not health_list:
         return None
@@ -765,6 +841,8 @@ if 'health_metrics' not in st.session_state:
     st.session_state.health_metrics = load_health()
 if 'budgets' not in st.session_state:
     st.session_state.budgets = load_budgets()
+if 'extracted_metrics' not in st.session_state:
+    st.session_state.extracted_metrics = None
 
 # Main UI
 st.title("🏥 Health & Wealth Tracker")
@@ -1291,12 +1369,15 @@ with tabs[3]:  # Wealth Dashboard
 with tabs[4]:  # Health
     st.markdown("### 🏥 Health Tracking & Analysis with Trends")
     
+    st.markdown("#### 👤 Whose health data?")
+    health_person = st.radio("Track health for:", ("Govind", "Amrithavarshini"), horizontal=True, key="health_person_radio")
+    
     st.markdown("#### 📄 Upload Health Report (Auto-Extract)")
     uploaded_report = st.file_uploader("Upload Blood Test Report", type=["jpg", "jpeg", "png", "gif", "webp", "pdf"], key="health_report_upload")
     
     if uploaded_report:
-        st.info("📊 Processing your health report...")
-        if st.button("🤖 Extract Metrics from Report"):
+        st.info(f"📊 Processing {health_person}'s health report...")
+        if st.button("🤖 Extract Metrics from Report", key="extract_report_btn"):
             with st.spinner("Analyzing report..."):
                 extracted = extract_health_report(uploaded_report.getvalue())
                 
@@ -1305,39 +1386,49 @@ with tabs[4]:  # Health
                     test_date = extracted.get('test_date', str(datetime.now().date()))
                     metrics = extracted.get('metrics', [])
                     
+                    st.session_state['extracted_metrics'] = metrics
+                    st.session_state['extracted_date'] = test_date
+                    st.session_state['extracted_person'] = health_person
+                    
                     st.markdown("**Extracted Metrics:**")
                     for metric in metrics:
                         st.write(f"• **{metric.get('name')}**: {metric.get('value')} {metric.get('unit')} (Normal: {metric.get('normal_range')})")
-                    
-                    if st.button("💾 Save All Metrics to Google Sheets"):
-                        saved_count = 0
-                        for metric in metrics:
-                            health_entry = {
-                                'date': test_date,
-                                'metric': metric.get('name', ''),
-                                'value': metric.get('value', ''),
-                                'unit': metric.get('unit', ''),
-                                'normal_range': metric.get('normal_range', ''),
-                                'type': 'Blood Test',
-                                'added_at': datetime.now().isoformat()
-                            }
-                            if save_health_to_gsheet(health_entry):
-                                st.session_state.health_metrics.append(health_entry)
-                                saved_count += 1
-                        
-                        st.success(f"✅ {saved_count} metrics saved to Google Sheets!")
-                        st.balloons()
+    
+    # Show save button only if we have extracted metrics
+    if 'extracted_metrics' in st.session_state and st.session_state.get('extracted_metrics'):
+        if st.button("💾 Save All Metrics to Google Sheets", key="save_extracted_metrics_btn"):
+            saved_count = 0
+            for metric in st.session_state['extracted_metrics']:
+                health_entry = {
+                    'date': st.session_state.get('extracted_date', str(datetime.now().date())),
+                    'metric': metric.get('name', ''),
+                    'value': metric.get('value', ''),
+                    'unit': metric.get('unit', ''),
+                    'normal_range': metric.get('normal_range', ''),
+                    'type': 'Blood Test',
+                    'person': st.session_state.get('extracted_person', 'Govind'),
+                    'added_at': datetime.now().isoformat()
+                }
+                if save_health_to_gsheet(health_entry):
+                    st.session_state.health_metrics.append(health_entry)
+                    saved_count += 1
+            
+            if saved_count > 0:
+                st.success(f"✅ {saved_count} metrics saved for {st.session_state.get('extracted_person', 'Govind')}!")
+                st.balloons()
+                # Clear extracted metrics after saving
+                del st.session_state['extracted_metrics']
     
     st.markdown("---")
     
     st.markdown("#### 📊 OR Enter Health Metrics Manually")
     with st.form("add_health_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             metric_date = st.date_input("Test Date", key="metric_date")
+            person_input = st.selectbox("Person", ["Govind", "Amrithavarshini"], key="metric_person")
         with col2:
             metric_name = st.text_input("Metric Name (e.g., Cholesterol, Blood Sugar)", key="metric_name")
-        with col3:
             metric_type = st.selectbox("Type", ["Blood Test", "Blood Pressure", "Weight/BMI", "Other"], key="metric_type")
         
         col1, col2, col3 = st.columns(3)
@@ -1357,45 +1448,137 @@ with tabs[4]:  # Health
                 'unit': metric_unit,
                 'normal_range': metric_normal,
                 'type': metric_type,
+                'person': person_input,
                 'added_at': datetime.now().isoformat()
             }
             if save_health_to_gsheet(health_entry):
                 st.session_state.health_metrics.append(health_entry)
-                st.success("✅ Health metric saved!")
+                st.success(f"✅ Health metric saved for {person_input}!")
     
     st.markdown("#### 📈 Health Analysis & Trends")
     if st.session_state.health_metrics:
-        latest_analysis = analyze_health_metrics(st.session_state.health_metrics)
+        # Filter by person
+        person_filter = st.selectbox("View trends for:", ["Govind", "Amrithavarshini", "Both"], key="person_trends_filter")
         
-        if latest_analysis:
-            status = latest_analysis.get('overall_status', 'Unknown')
-            status_emoji = "✅" if status == "Good" else "⚠️" if status == "Fair" else "🔴"
-            st.write(f"**Overall Status: {status_emoji} {status}**")
+        if person_filter == "Both":
+            person_data = st.session_state.health_metrics
+        else:
+            person_data = [h for h in st.session_state.health_metrics if h.get('person', 'Govind') == person_filter]
+        
+        if person_data:
+            latest_analysis = analyze_health_metrics(person_data)
             
-            if latest_analysis.get('flags'):
-                st.write("**⚠️ Flags:**")
-                for flag in latest_analysis.get('flags', []):
-                    st.write(f"  • {flag}")
+            if latest_analysis:
+                status = latest_analysis.get('overall_status', 'Unknown')
+                status_emoji = "✅" if status == "Good" else "⚠️" if status == "Fair" else "🔴"
+                st.write(f"**{person_filter}'s Overall Status: {status_emoji} {status}**")
+                
+                if latest_analysis.get('flags'):
+                    st.write("**⚠️ Flags:**")
+                    for flag in latest_analysis.get('flags', []):
+                        st.write(f"  • {flag}")
+                
+                st.markdown("**💡 Health Recommendations:**")
+                for rec in latest_analysis.get('recommendations', []):
+                    st.write(f"  • {rec}")
             
-            st.markdown("**💡 Health Recommendations:**")
-            for rec in latest_analysis.get('recommendations', []):
-                st.write(f"  • {rec}")
-        
-        st.markdown("#### 📊 Metric Trends Over Time")
-        unique_metrics = sorted(set(h.get('metric', '') for h in st.session_state.health_metrics))
-        
-        if unique_metrics:
-            selected_metric = st.selectbox("Select metric to view trend", unique_metrics)
-            fig = plot_health_trend(st.session_state.health_metrics, selected_metric)
+            st.markdown("#### 📊 Metric Trends Over Time")
+            unique_metrics = sorted(set(h.get('metric', '') for h in person_data))
             
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Need at least 2 data points to show trend. Keep adding health metrics!")
-        
-        st.markdown("#### 📋 Your Metrics History")
-        for metric in reversed(st.session_state.health_metrics[-10:]):
-            st.write(f"**{metric.get('date')}** - {metric.get('metric')}: {metric.get('value')} {metric.get('unit')} (Normal: {metric.get('normal_range')})")
+            if unique_metrics:
+                selected_metric = st.selectbox("Select metric to view trend", unique_metrics, key="metric_trend_select")
+                fig = plot_health_trend(person_data, selected_metric)
+                
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Need at least 2 data points to show trend. Keep adding health metrics!")
+            
+            st.markdown(f"#### 📋 {person_filter}'s Metrics History")
+            for metric in reversed(person_data[-10:]):
+                st.write(f"**{metric.get('date')}** - {metric.get('metric')}: {metric.get('value')} {metric.get('unit')} (Normal: {metric.get('normal_range')})")
+        else:
+            st.info(f"No health metrics found for {person_filter}. Start by uploading a health report!")
+    
+    st.markdown("---")
+    st.markdown("#### 👨‍👩‍❤️ Household Health Recommendations (Cook Together!)")
+    
+    # Get data for both people
+    govind_health = [h for h in st.session_state.health_metrics if h.get('person', 'Govind') == 'Govind']
+    amritha_health = [h for h in st.session_state.health_metrics if h.get('person', 'Amrithavarshini') == 'Amrithavarshini']
+    
+    if govind_health and amritha_health:
+        if st.button("🤖 Analyze Both Health Together", key="household_health_btn"):
+            with st.spinner("Analyzing household health profile..."):
+                joint_analysis = analyze_joint_health(govind_health, amritha_health)
+                
+                if joint_analysis:
+                    st.success("✅ Household Analysis Complete!")
+                    
+                    # Overall Grade
+                    grade = joint_analysis.get('household_grocery_grade', 'N/A')
+                    st.markdown(f"### 📈 Your Household Health Grade: **{grade}**")
+                    
+                    # Summary
+                    summary = joint_analysis.get('summary', '')
+                    if summary:
+                        st.info(summary)
+                    
+                    # Common Concerns
+                    concerns = joint_analysis.get('common_concerns', [])
+                    if concerns:
+                        st.markdown("**🎯 Common Health Concerns (Both):**")
+                        for concern in concerns:
+                            st.write(f"  • {concern}")
+                    
+                    # Individual Flags
+                    ind_flags = joint_analysis.get('individual_flags', {})
+                    if ind_flags:
+                        st.markdown("**⚠️ Individual Health Flags:**")
+                        if ind_flags.get('govind'):
+                            st.write("  **Govind:**")
+                            for flag in ind_flags['govind']:
+                                st.write(f"    • {flag}")
+                        if ind_flags.get('amrithavarshini'):
+                            st.write("  **Amrithavarshini:**")
+                            for flag in ind_flags['amrithavarshini']:
+                                st.write(f"    • {flag}")
+                    
+                    # Household Diet Goals
+                    goals = joint_analysis.get('household_diet_goals', [])
+                    if goals:
+                        st.markdown("**🎯 Household Diet Goals:**")
+                        for goal in goals:
+                            st.write(f"  • {goal}")
+                    
+                    # Keep Foods
+                    keep_foods = joint_analysis.get('keep_foods', [])
+                    if keep_foods:
+                        st.markdown("**✅ Foods to Keep (Good for Both):**")
+                        for food in keep_foods:
+                            st.write(f"  • {food}")
+                    
+                    # Reduce Foods
+                    reduce_foods = joint_analysis.get('reduce_foods', [])
+                    if reduce_foods:
+                        st.markdown("**⚠️ Foods to Reduce (Bad for Both):**")
+                        for food in reduce_foods:
+                            st.write(f"  • {food}")
+                    
+                    # Meal Tips
+                    meal_tips = joint_analysis.get('household_meal_tips', [])
+                    if meal_tips:
+                        st.markdown("**🍳 Household Cooking Tips:**")
+                        for tip in meal_tips:
+                            st.write(f"  • {tip}")
+                    
+                    # Cooking Together Advice
+                    advice = joint_analysis.get('cooking_together_advice', '')
+                    if advice:
+                        st.markdown("**💡 Cooking Together Advice:**")
+                        st.info(advice)
+    else:
+        st.info("📋 Need health data for BOTH Govind and Amrithavarshini to show household recommendations. Upload health reports for both!")
 
 with tabs[5]:  # Smart Grocery
     st.markdown("### 🥗 Smart Grocery Recommendations")
@@ -1411,15 +1594,21 @@ with tabs[5]:  # Smart Grocery
         if all_items:
             st.markdown("#### 📊 Analyzing Your Groceries...")
             
-            # Check if health metrics exist
-            has_health_data = len(st.session_state.health_metrics) > 0
+            # Check if health metrics exist for both people
+            govind_health = [h for h in st.session_state.health_metrics if h.get('person', 'Govind') == 'Govind']
+            amritha_health = [h for h in st.session_state.health_metrics if h.get('person', 'Amrithavarshini') == 'Amrithavarshini']
+            has_both_health = len(govind_health) > 0 and len(amritha_health) > 0
+            has_any_health = len(st.session_state.health_metrics) > 0
             
             if st.button("🤖 Get Smart Recommendations"):
-                with st.spinner("Analyzing your groceries..."):
-                    # If health data exists, use personalized mode
-                    if has_health_data:
+                with st.spinner("Analyzing your household groceries..."):
+                    # If health data exists for both, use household mode
+                    if has_both_health:
                         analysis = analyze_grocery_health(all_items, st.session_state.health_metrics)
-                        mode = "PERSONALIZED (based on your health)"
+                        mode = "HOUSEHOLD (optimized for both Govind & Amrithavarshini)"
+                    elif has_any_health:
+                        analysis = analyze_grocery_health(all_items, st.session_state.health_metrics)
+                        mode = "PERSONALIZED (based on available health data)"
                     else:
                         analysis = analyze_grocery_health(all_items, None)
                         mode = "GENERIC (general health guidelines)"
@@ -1429,7 +1618,10 @@ with tabs[5]:  # Smart Grocery
                         
                         # Overall Grade
                         grade = analysis.get('overall_grade', 'N/A')
-                        st.markdown(f"### 📈 Your Grocery Grade: **{grade}**")
+                        if has_both_health:
+                            st.markdown(f"### 📈 Your Household Grocery Grade: **{grade}** 👨‍👩‍❤️")
+                        else:
+                            st.markdown(f"### 📈 Your Grocery Grade: **{grade}**")
                         
                         # Items Analysis
                         st.markdown("#### 📋 Item Analysis:")
@@ -1457,14 +1649,17 @@ with tabs[5]:  # Smart Grocery
                         # Note
                         note = analysis.get('personalized_note') or analysis.get('note', '')
                         if note:
-                            if has_health_data:
+                            if has_both_health:
+                                st.info(f"👨‍👩‍❤️ HOUSEHOLD: {note}")
+                            elif has_any_health:
                                 st.info(f"📊 {note}")
                             else:
                                 st.warning(f"⚠️ {note}")
                         
-                        # Encourage health reports if not present
-                        if not has_health_data:
+                        # Encourage health reports if not present for both
+                        if not has_both_health:
                             st.markdown("---")
+                            st.info("💡 **Pro Tip:** Upload health reports for BOTH Govind & Amrithavarshini to get household-optimized recommendations since you cook together!")
                             st.success("💪 **Tip:** Upload health reports to get PERSONALIZED recommendations based on YOUR health metrics!")
         else:
             st.info("📸 No grocery items found. Upload receipts first to get recommendations!")
