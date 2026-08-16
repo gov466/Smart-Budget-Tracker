@@ -808,7 +808,7 @@ Provide ONLY a JSON response with this structure:
         return None
 
 def plot_health_trend(health_metrics, metric_name):
-    """Create trend chart for a health metric"""
+    """Create trend chart for a health metric with normal range visualization"""
     data = [h for h in health_metrics if h.get('metric', '').lower() == metric_name.lower()]
     
     if len(data) < 2:
@@ -834,33 +834,119 @@ def plot_health_trend(health_metrics, metric_name):
         
         fig = go.Figure()
         
+        # Add main trend line
         fig.add_trace(go.Scatter(
             x=df['date'],
             y=df['value'],
             mode='lines+markers',
             name=metric_name,
-            line=dict(color='#1f77b4', width=2),
-            marker=dict(size=8)
+            line=dict(color='#1f77b4', width=3),
+            marker=dict(size=10, color='#1f77b4'),
+            hovertemplate='<b>%{fullData.name}</b><br>Date: %{x|%Y-%m-%d}<br>Value: %{y:.2f}<extra></extra>'
         ))
         
+        # Parse normal range and add zones
         normal_range = data[0].get('normal_range', '')
-        if normal_range and '-' in normal_range:
-            try:
-                min_val, max_val = normal_range.split('-')
-                min_val = safe_float(min_val.strip())
-                max_val = safe_float(max_val.strip())
-                
-                fig.add_hline(y=min_val, line_dash="dash", line_color="green", annotation_text="Normal Range")
-                fig.add_hline(y=max_val, line_dash="dash", line_color="green")
-            except:
-                pass
+        min_normal = None
+        max_normal = None
         
+        if normal_range and normal_range != 'See below':
+            # Try different formats
+            
+            # Format 1: "120-200"
+            if '-' in normal_range and not any(c in normal_range for c in '<>'):
+                try:
+                    parts = normal_range.split('-')
+                    min_normal = safe_float(parts[0].strip())
+                    max_normal = safe_float(parts[1].strip())
+                except:
+                    pass
+            
+            # Format 2: "< 5.20" (less than)
+            elif '<' in normal_range:
+                try:
+                    max_normal = safe_float(normal_range.replace('<', '').strip())
+                    min_normal = None
+                except:
+                    pass
+            
+            # Format 3: "> 1.00" (greater than)
+            elif '>' in normal_range:
+                try:
+                    min_normal = safe_float(normal_range.replace('>', '').replace('=', '').strip())
+                    max_normal = None
+                except:
+                    pass
+            
+            # Format 4: ">= 1.00" (greater than or equal)
+            elif '>=' in normal_range:
+                try:
+                    min_normal = safe_float(normal_range.replace('>=', '').strip())
+                    max_normal = None
+                except:
+                    pass
+        
+        # Add normal range visualization
+        y_min = df['value'].min() * 0.95
+        y_max = df['value'].max() * 1.05
+        
+        if min_normal is not None and max_normal is not None:
+            # Range format: add green zone
+            fig.add_hrect(
+                y0=min_normal, y1=max_normal,
+                fillcolor="green", opacity=0.1,
+                layer="below", line_width=0,
+                annotation_text="Normal Range", annotation_position="right"
+            )
+            fig.add_hline(y=min_normal, line_dash="dash", line_color="green", line_width=2,
+                         annotation_text=f"Normal Min: {min_normal}")
+            fig.add_hline(y=max_normal, line_dash="dash", line_color="green", line_width=2,
+                         annotation_text=f"Normal Max: {max_normal}")
+        
+        elif min_normal is not None:
+            # Greater than format: green zone above
+            fig.add_hrect(
+                y0=min_normal, y1=y_max,
+                fillcolor="green", opacity=0.1,
+                layer="below", line_width=0,
+                annotation_text="Normal Range", annotation_position="right"
+            )
+            fig.add_hline(y=min_normal, line_dash="dash", line_color="green", line_width=2,
+                         annotation_text=f"Normal Min: {min_normal}")
+        
+        elif max_normal is not None:
+            # Less than format: green zone below
+            fig.add_hrect(
+                y0=y_min, y1=max_normal,
+                fillcolor="green", opacity=0.1,
+                layer="below", line_width=0,
+                annotation_text="Normal Range", annotation_position="right"
+            )
+            fig.add_hline(y=max_normal, line_dash="dash", line_color="green", line_width=2,
+                         annotation_text=f"Normal Max: {max_normal}")
+        
+        # Update layout with better styling
+        unit = data[0].get('unit', '')
         fig.update_layout(
-            title=f"{metric_name} Trend Over Time",
+            title={
+                'text': f"<b>{metric_name} Trend Over Time</b><br><sub>Normal Range: {normal_range if normal_range else 'N/A'}</sub>",
+                'x': 0.5,
+                'xanchor': 'center'
+            },
             xaxis_title="Date",
-            yaxis_title=f"{metric_name} ({data[0].get('unit', '')})",
+            yaxis_title=f"{metric_name} ({unit})",
             hovermode='x unified',
-            height=400
+            height=500,
+            template='plotly_dark',
+            showlegend=True,
+            legend=dict(
+                x=0.02, y=0.98,
+                bgcolor='rgba(0,0,0,0.5)',
+                bordercolor='white',
+                borderwidth=1
+            ),
+            margin=dict(t=100, b=80, l=80, r=100),
+            font=dict(size=12)
         )
         
         return fig
