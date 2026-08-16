@@ -816,11 +816,20 @@ def plot_health_trend(health_metrics, metric_name):
     
     try:
         df = pd.DataFrame(data)
-        df['date'] = pd.to_datetime(df['date'])
+        
+        # Force date parsing - handle multiple formats
+        df['date'] = pd.to_datetime(df['date'], format='mixed', errors='coerce')
+        
+        # Drop rows with invalid dates
+        df = df.dropna(subset=['date'])
+        
+        if df.empty:
+            return None
+        
         df['value'] = df['value'].apply(lambda x: safe_float(x))
         df = df.dropna(subset=['value']).sort_values('date')
         
-        if df.empty:
+        if df.empty or len(df) < 2:
             return None
         
         fig = go.Figure()
@@ -855,7 +864,8 @@ def plot_health_trend(health_metrics, metric_name):
         )
         
         return fig
-    except:
+    except Exception as e:
+        st.error(f"Error plotting trend: {str(e)}")
         return None
 
 def calculate_monthly_finances(expenses, settings, debts):
