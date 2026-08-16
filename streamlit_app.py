@@ -1696,9 +1696,42 @@ with tabs[4]:  # Health
                 else:
                     st.info("Need at least 2 data points to show trend. Keep adding health metrics!")
             
-            st.markdown(f"#### 📋 {person_filter}'s Metrics History")
-            for metric in reversed(person_data[-10:]):
-                st.write(f"**{metric.get('date')}** - {metric.get('metric')}: {metric.get('value')} {metric.get('unit')} (Normal: {metric.get('normal_range')})")
+            st.markdown(f"#### 📋 {person_filter}'s Metrics History (All Time)")
+            
+            # Show how many records
+            st.caption(f"📊 Showing all {len(person_data)} measurements")
+            
+            # Option to expand/collapse
+            with st.expander(f"📈 View all {len(person_data)} measurements", expanded=True):
+                # Create columns for better display
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 2])
+                with col1:
+                    st.write("**Date**")
+                with col2:
+                    st.write("**Metric**")
+                with col3:
+                    st.write("**Value**")
+                with col4:
+                    st.write("**Unit**")
+                with col5:
+                    st.write("**Normal Range**")
+                
+                st.divider()
+                
+                # Show all data sorted by date (newest first)
+                sorted_data = sorted(person_data, key=lambda x: x.get('date', ''), reverse=True)
+                for metric in sorted_data:
+                    col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 2])
+                    with col1:
+                        st.write(metric.get('date', 'N/A'))
+                    with col2:
+                        st.write(metric.get('metric', 'N/A'))
+                    with col3:
+                        st.write(str(metric.get('value', 'N/A')))
+                    with col4:
+                        st.write(metric.get('unit', 'N/A'))
+                    with col5:
+                        st.write(metric.get('normal_range', 'N/A'))
         else:
             st.info(f"No health metrics found for {person_filter}. Start by uploading a health report!")
     
