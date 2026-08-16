@@ -340,7 +340,7 @@ def save_settings_to_gsheet(settings):
         return False
 
 def extract_images_from_pdf(pdf_bytes):
-    """Extract images/pages from PDF and convert to images for Claude Vision"""
+    """Extract images/pages from PDF and convert to JPEG for Claude Vision"""
     if not fitz:
         st.error("❌ PDF support requires PyMuPDF. Please install: pip install pymupdf")
         return []
@@ -354,8 +354,22 @@ def extract_images_from_pdf(pdf_bytes):
             page = pdf_document[page_num]
             # Render page to image (PNG)
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
-            image_bytes = pix.tobytes("png")
-            images.append(image_bytes)
+            
+            # Convert PNG to JPEG using PIL (for Claude Vision compatibility)
+            png_bytes = pix.tobytes("png")
+            png_image = Image.open(io.BytesIO(png_bytes))
+            
+            # Convert to JPEG
+            jpeg_buffer = io.BytesIO()
+            if png_image.mode == 'RGBA':
+                # JPEG doesn't support transparency, convert to RGB
+                rgb_image = Image.new('RGB', png_image.size, (255, 255, 255))
+                rgb_image.paste(png_image, mask=png_image.split()[3])
+                rgb_image.save(jpeg_buffer, format='JPEG', quality=95)
+            else:
+                png_image.save(jpeg_buffer, format='JPEG', quality=95)
+            
+            images.append(jpeg_buffer.getvalue())
         
         pdf_document.close()
         return images
