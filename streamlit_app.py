@@ -711,6 +711,55 @@ Provide ONLY a JSON response with this structure:
     except:
         return None
 
+def analyze_health_metrics(health_list):
+    """Analyze health metrics for a single person"""
+    if not health_list:
+        return None
+    
+    try:
+        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+        
+        latest = health_list[-1] if health_list else {}
+        metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'added_at', 'person']])
+        
+        prompt = f"""Analyze these health metrics and provide brief assessment.
+
+Metrics:
+{metrics_text}
+
+Provide ONLY a JSON response with this structure:
+{{
+    "overall_status": "Good/Fair/Concerning",
+    "flags": ["High cholesterol", "Good blood pressure"],
+    "recommendations": ["Reduce salt intake", "Increase fiber"],
+    "diet_guidance": "What food groups to focus on or avoid"
+}}"""
+        
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        response_text = message.content[0].text.strip()
+        
+        # Remove markdown code blocks if present
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+        
+        # Try to parse JSON
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            return None
+    except:
+        return None
+
 def plot_health_trend(health_metrics, metric_name):
     """Create trend chart for a health metric"""
     data = [h for h in health_metrics if h.get('metric', '').lower() == metric_name.lower()]
@@ -1372,30 +1421,58 @@ with tabs[4]:  # Health
     st.markdown("#### 👤 Whose health data?")
     health_person = st.radio("Track health for:", ("Govind", "Amrithavarshini"), horizontal=True, key="health_person_radio")
     
-    st.markdown("#### 📄 Upload Health Report (Auto-Extract)")
-    uploaded_report = st.file_uploader("Upload Blood Test Report", type=["jpg", "jpeg", "png", "gif", "webp", "pdf"], key="health_report_upload")
+    st.markdown("#### 📄 Upload Health Report Pages (Auto-Extract)")
+    st.caption("💡 Tip: If your report is on multiple pages (JPG images), upload all pages at once - they'll be combined automatically!")
+    uploaded_reports = st.file_uploader("Upload Blood Test Report Pages (JPG/PNG - can upload multiple pages)", 
+                                        type=["jpg", "jpeg", "png", "gif", "webp"], 
+                                        key="health_report_upload",
+                                        accept_multiple_files=True)
     
-    if uploaded_report:
-        st.info(f"📊 Processing {health_person}'s health report...")
-        if st.button("🤖 Extract Metrics from Report", key="extract_report_btn"):
-            with st.spinner("Analyzing report..."):
-                extracted = extract_health_report(uploaded_report.getvalue())
+    if uploaded_reports:
+        st.info(f"📊 Processing {health_person}'s health report ({len(uploaded_reports)} page(s))...")
+        if st.button("🤖 Extract Metrics from All Pages", key="extract_report_btn"):
+            with st.spinner(f"Analyzing {len(uploaded_reports)} page(s)..."):
+                all_extracted_metrics = []
                 
-                if extracted:
-                    st.success("✅ Metrics extracted!")
-                    test_date = extracted.get('test_date', str(datetime.now().date()))
-                    metrics = extracted.get('metrics', [])
+                # Extract from each page
+                for idx, report_file in enumerate(uploaded_reports):
+                    st.write(f"📖 Processing page {idx+1}/{len(uploaded_reports)}...")
+                    extracted = extract_health_report(report_file.getvalue())
                     
-                    st.session_state['extracted_metrics'] = metrics
+                    if extracted:
+                        metrics = extracted.get('metrics', [])
+                        all_extracted_metrics.extend(metrics)
+                
+                # Deduplicate metrics (same metric name from different pages)
+                if all_extracted_metrics:
+                    # Group by metric name and keep latest/best value
+                    metric_dict = {}
+                    for metric in all_extracted_metrics:
+                        metric_name = metric.get('name', '').lower()
+                        if metric_name not in metric_dict:
+                            metric_dict[metric_name] = metric
+                        else:
+                            # Keep first occurrence (can change logic if needed)
+                            pass
+                    
+                    dedup_metrics = list(metric_dict.values())
+                    
+                    st.success(f"✅ Metrics extracted from all {len(uploaded_reports)} page(s)! ({len(dedup_metrics)} unique metrics)")
+                    test_date = extracted.get('test_date', str(datetime.now().date())) if extracted else str(datetime.now().date())
+                    
+                    st.session_state['extracted_metrics'] = dedup_metrics
                     st.session_state['extracted_date'] = test_date
                     st.session_state['extracted_person'] = health_person
                     
                     st.markdown("**Extracted Metrics:**")
-                    for metric in metrics:
+                    for metric in dedup_metrics:
                         st.write(f"• **{metric.get('name')}**: {metric.get('value')} {metric.get('unit')} (Normal: {metric.get('normal_range')})")
+                else:
+                    st.error("❌ Could not extract metrics from any pages. Make sure they are clear JPG/PNG images of blood test reports.")
     
     # Show save button only if we have extracted metrics
     if 'extracted_metrics' in st.session_state and st.session_state.get('extracted_metrics'):
+        st.markdown(f"**📊 Ready to save {len(st.session_state['extracted_metrics'])} metric(s) from {health_person}'s report**")
         if st.button("💾 Save All Metrics to Google Sheets", key="save_extracted_metrics_btn"):
             saved_count = 0
             for metric in st.session_state['extracted_metrics']:
@@ -1414,10 +1491,13 @@ with tabs[4]:  # Health
                     saved_count += 1
             
             if saved_count > 0:
-                st.success(f"✅ {saved_count} metrics saved for {st.session_state.get('extracted_person', 'Govind')}!")
+                st.success(f"✅ {saved_count} metrics saved for {st.session_state.get('extracted_person', 'Govind')}! 🎉")
                 st.balloons()
                 # Clear extracted metrics after saving
                 del st.session_state['extracted_metrics']
+                st.rerun()
+            else:
+                st.error("❌ Failed to save metrics. Please try again.")
     
     st.markdown("---")
     
