@@ -27,6 +27,15 @@ import anthropic
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+import io
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    fitz = None
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
 
 # Google Sheets configuration
 SPREADSHEET_ID = "1tzRTNtq3N-QPabBSowhmzYXuxHR9bimvYTn1z0wjuQs"
@@ -329,6 +338,30 @@ def save_settings_to_gsheet(settings):
     except Exception as e:
         st.error(f"Error saving settings: {str(e)}")
         return False
+
+def extract_images_from_pdf(pdf_bytes):
+    """Extract images/pages from PDF and convert to images for Claude Vision"""
+    if not fitz:
+        st.error("❌ PDF support requires PyMuPDF. Please install: pip install pymupdf")
+        return []
+    
+    try:
+        # Open PDF
+        pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+        images = []
+        
+        for page_num in range(len(pdf_document)):
+            page = pdf_document[page_num]
+            # Render page to image (PNG)
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
+            image_bytes = pix.tobytes("png")
+            images.append(image_bytes)
+        
+        pdf_document.close()
+        return images
+    except Exception as e:
+        st.error(f"❌ Error processing PDF: {str(e)}")
+        return []
 
 def extract_receipt(image_bytes):
     try:
@@ -1095,25 +1128,69 @@ with tabs[1]:  # Debts
 with tabs[2]:  # Spending
     st.markdown("### 📸 Track Variable Spending (Receipts)")
     
-    uploaded_file = st.file_uploader("Upload Receipt", type=["jpg", "jpeg", "png", "gif", "webp"], key="receipt_upload")
+    uploaded_file = st.file_uploader("Upload Receipt (JPG/PNG/PDF)", type=["jpg", "jpeg", "png", "gif", "webp", "pdf"], key="receipt_upload")
     
     if uploaded_file:
-        image = Image.open(uploaded_file)
-        st.image(image, use_container_width=True)
+        file_type = uploaded_file.type
         
-        if st.button("🤖 Process Receipt"):
-            with st.spinner("Processing..."):
-                receipt = extract_receipt(uploaded_file.getvalue())
+        # Handle PDF
+        if file_type == "application/pdf":
+            st.info(f"📄 Processing PDF: {uploaded_file.name}")
+            pdf_images = extract_images_from_pdf(uploaded_file.getvalue())
+            
+            if pdf_images:
+                st.write(f"✅ Extracted {len(pdf_images)} page(s) from PDF")
                 
-                if receipt:
-                    category = categorize_expense(receipt)
-                    receipt['category'] = category
-                    receipt['uploaded_at'] = datetime.now().isoformat()
+                if st.button("🤖 Process PDF Receipt"):
+                    with st.spinner(f"Processing {len(pdf_images)} page(s)..."):
+                        all_receipts = []
+                        
+                        for page_idx, image_bytes in enumerate(pdf_images):
+                            st.write(f"📖 Processing page {page_idx+1}/{len(pdf_images)}...")
+                            receipt = extract_receipt(image_bytes)
+                            
+                            if receipt:
+                                all_receipts.append(receipt)
+                        
+                        if all_receipts:
+                            st.success(f"✅ Extracted {len(all_receipts)} receipt(s) from PDF!")
+                            
+                            # Process each receipt
+                            saved_count = 0
+                            for receipt in all_receipts:
+                                category = categorize_expense(receipt)
+                                receipt['category'] = category
+                                receipt['uploaded_at'] = datetime.now().isoformat()
+                                
+                                if save_expense_to_gsheet(receipt):
+                                    st.session_state.expenses.append(receipt)
+                                    saved_count += 1
+                            
+                            st.success(f"✅ {saved_count} receipt(s) processed from PDF!")
+                            st.balloons()
+                        else:
+                            st.error("❌ Could not extract receipts from PDF. Make sure it contains clear images of receipts.")
+            else:
+                st.error("❌ Could not extract pages from PDF. Please try a different PDF file.")
+        
+        # Handle Images
+        else:
+            image = Image.open(uploaded_file)
+            st.image(image, use_container_width=True)
+            
+            if st.button("🤖 Process Receipt"):
+                with st.spinner("Processing..."):
+                    receipt = extract_receipt(uploaded_file.getvalue())
                     
-                    if save_expense_to_gsheet(receipt):
-                        st.session_state.expenses.append(receipt)
-                        st.success("✅ Receipt processed!")
-                        col1, col2, col3 = st.columns(3)
+                    if receipt:
+                        category = categorize_expense(receipt)
+                        receipt['category'] = category
+                        receipt['uploaded_at'] = datetime.now().isoformat()
+                        
+                        if save_expense_to_gsheet(receipt):
+                            st.session_state.expenses.append(receipt)
+                            st.success("✅ Receipt processed!")
+                            col1, col2, col3 = st.columns(3)
                         with col1:
                             st.metric("Store", receipt.get('merchant', 'N/A'))
                         with col2:
@@ -1422,53 +1499,74 @@ with tabs[4]:  # Health
     health_person = st.radio("Track health for:", ("Govind", "Amrithavarshini"), horizontal=True, key="health_person_radio")
     
     st.markdown("#### 📄 Upload Health Report Pages (Auto-Extract)")
-    st.caption("💡 Tip: If your report is on multiple pages (JPG images), upload all pages at once - they'll be combined automatically!")
-    uploaded_reports = st.file_uploader("Upload Blood Test Report Pages (JPG/PNG - can upload multiple pages)", 
-                                        type=["jpg", "jpeg", "png", "gif", "webp"], 
+    st.caption("💡 Tip: If your report is on multiple pages (JPG/PNG/PDF), upload all pages at once - they'll be combined automatically!")
+    uploaded_reports = st.file_uploader("Upload Blood Test Report Pages (JPG/PNG/PDF - can upload multiple pages)", 
+                                        type=["jpg", "jpeg", "png", "gif", "webp", "pdf"], 
                                         key="health_report_upload",
                                         accept_multiple_files=True)
     
     if uploaded_reports:
-        st.info(f"📊 Processing {health_person}'s health report ({len(uploaded_reports)} page(s))...")
-        if st.button("🤖 Extract Metrics from All Pages", key="extract_report_btn"):
-            with st.spinner(f"Analyzing {len(uploaded_reports)} page(s)..."):
-                all_extracted_metrics = []
-                
-                # Extract from each page
-                for idx, report_file in enumerate(uploaded_reports):
-                    st.write(f"📖 Processing page {idx+1}/{len(uploaded_reports)}...")
-                    extracted = extract_health_report(report_file.getvalue())
+        # Handle mixed file types (images + PDFs)
+        all_image_bytes = []
+        file_descriptions = []
+        
+        for uploaded_file in uploaded_reports:
+            file_type = uploaded_file.type
+            
+            if file_type == "application/pdf":
+                # Extract images from PDF
+                pdf_images = extract_images_from_pdf(uploaded_file.getvalue())
+                if pdf_images:
+                    all_image_bytes.extend(pdf_images)
+                    file_descriptions.append(f"PDF: {uploaded_file.name} ({len(pdf_images)} pages)")
+            else:
+                # Regular image file
+                all_image_bytes.append(uploaded_file.getvalue())
+                file_descriptions.append(f"Image: {uploaded_file.name}")
+        
+        if all_image_bytes:
+            st.info(f"📊 Processing {health_person}'s health report:\n" + "\n".join([f"  • {desc}" for desc in file_descriptions]))
+            if st.button("🤖 Extract Metrics from All Pages", key="extract_report_btn"):
+                with st.spinner(f"Analyzing {len(all_image_bytes)} page(s)..."):
+                    all_extracted_metrics = []
                     
-                    if extracted:
-                        metrics = extracted.get('metrics', [])
-                        all_extracted_metrics.extend(metrics)
-                
-                # Deduplicate metrics (same metric name from different pages)
-                if all_extracted_metrics:
-                    # Group by metric name and keep latest/best value
-                    metric_dict = {}
-                    for metric in all_extracted_metrics:
-                        metric_name = metric.get('name', '').lower()
-                        if metric_name not in metric_dict:
-                            metric_dict[metric_name] = metric
-                        else:
-                            # Keep first occurrence (can change logic if needed)
-                            pass
+                    # Extract from each page
+                    for idx, image_bytes in enumerate(all_image_bytes):
+                        st.write(f"📖 Processing page {idx+1}/{len(all_image_bytes)}...")
+                        extracted = extract_health_report(image_bytes)
+                        
+                        if extracted:
+                            metrics = extracted.get('metrics', [])
+                            all_extracted_metrics.extend(metrics)
                     
-                    dedup_metrics = list(metric_dict.values())
-                    
-                    st.success(f"✅ Metrics extracted from all {len(uploaded_reports)} page(s)! ({len(dedup_metrics)} unique metrics)")
-                    test_date = extracted.get('test_date', str(datetime.now().date())) if extracted else str(datetime.now().date())
-                    
-                    st.session_state['extracted_metrics'] = dedup_metrics
-                    st.session_state['extracted_date'] = test_date
-                    st.session_state['extracted_person'] = health_person
-                    
-                    st.markdown("**Extracted Metrics:**")
-                    for metric in dedup_metrics:
-                        st.write(f"• **{metric.get('name')}**: {metric.get('value')} {metric.get('unit')} (Normal: {metric.get('normal_range')})")
-                else:
-                    st.error("❌ Could not extract metrics from any pages. Make sure they are clear JPG/PNG images of blood test reports.")
+                    # Deduplicate metrics (same metric name from different pages)
+                    if all_extracted_metrics:
+                        # Group by metric name and keep latest/best value
+                        metric_dict = {}
+                        for metric in all_extracted_metrics:
+                            metric_name = metric.get('name', '').lower()
+                            if metric_name not in metric_dict:
+                                metric_dict[metric_name] = metric
+                            else:
+                                # Keep first occurrence (can change logic if needed)
+                                pass
+                        
+                        dedup_metrics = list(metric_dict.values())
+                        
+                        st.success(f"✅ Metrics extracted from all {len(all_image_bytes)} page(s)! ({len(dedup_metrics)} unique metrics)")
+                        test_date = extracted.get('test_date', str(datetime.now().date())) if extracted else str(datetime.now().date())
+                        
+                        st.session_state['extracted_metrics'] = dedup_metrics
+                        st.session_state['extracted_date'] = test_date
+                        st.session_state['extracted_person'] = health_person
+                        
+                        st.markdown("**Extracted Metrics:**")
+                        for metric in dedup_metrics:
+                            st.write(f"• **{metric.get('name')}**: {metric.get('value')} {metric.get('unit')} (Normal: {metric.get('normal_range')})")
+                    else:
+                        st.error("❌ Could not extract metrics from any pages. Make sure they are clear images or PDFs of blood test reports.")
+        else:
+            st.error("❌ No valid images found. Please upload JPG, PNG, or PDF files.")
     
     # Show save button only if we have extracted metrics
     if 'extracted_metrics' in st.session_state and st.session_state.get('extracted_metrics'):

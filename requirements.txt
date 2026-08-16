@@ -1,7 +1,11 @@
 anthropic>=0.21.0
-streamlit>=1.28.0
-Pillow>=10.0.0
-
-gspread
-
+streamlit
+Pillow
+pandas
 plotly
+gspread
+google-auth-oauthlib
+google-auth-httplib2
+google-auth
+PyMuPDF>=1.23.0
+pypdf>=3.0.0
