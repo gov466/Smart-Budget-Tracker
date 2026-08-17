@@ -322,10 +322,8 @@ def save_settings_to_gsheet(settings):
         ws = get_or_create_worksheet(sheet, "Settings", headers)
         
         # Validation: Check if we have meaningful data
+        # Note: Salary is now optional - you can track budget without entering it
         salary_total = safe_float(settings.get('your_salary', 0)) + safe_float(settings.get('wife_salary', 0))
-        if salary_total == 0:
-            st.error("❌ Error: Salary is 0! Settings not saved to prevent data loss.")
-            return False
         
         # Keep only row 2 (headers in row 1)
         all_rows = ws.get_all_values()
