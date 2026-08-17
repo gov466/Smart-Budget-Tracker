@@ -2052,6 +2052,7 @@ with tabs[6]:  # Budgets
     
     if st.button("💾 Save Budgets"):
         if save_budgets_to_gsheet(st.session_state.budgets):
+            st.balloons()
 
 st.markdown("---")
 st.markdown("💡 **Health & Wealth: Your complete life tracker** - Finances + Health + Nutrition (Data saved in Google Sheets ☁️)")
