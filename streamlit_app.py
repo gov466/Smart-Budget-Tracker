@@ -312,7 +312,7 @@ def save_health_to_gsheet(health_entry):
         return False
 
 def save_settings_to_gsheet(settings):
-    """Save settings to Google Sheets with safety checks"""
+    """Save settings to Google Sheets - Settings worksheet"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
@@ -349,6 +349,47 @@ def save_settings_to_gsheet(settings):
             
     except Exception as e:
         st.error(f"❌ Error in save_settings: {str(e)}")
+        return False
+
+def save_budgets_to_gsheet(budgets):
+    """Save budgets to Google Sheets - SEPARATE Budget worksheet"""
+    try:
+        sheet = get_gsheet_client()
+        if not sheet:
+            st.error("❌ Error: Cannot connect to Google Sheets")
+            return False
+        
+        # Get or create BUDGET worksheet (NOT Settings!)
+        try:
+            ws = sheet.worksheet("Budget")
+        except:
+            st.info("Creating 'Budget' worksheet...")
+            ws = sheet.add_worksheet(title="Budget", rows=1000, cols=20)
+        
+        # Get headers from budgets dict
+        headers = list(budgets.keys())
+        
+        # Clear and add headers
+        try:
+            ws.clear()
+            ws.insert_row(headers, 1)
+        except:
+            pass
+        
+        # Prepare data
+        values = [str(budgets.get(k, '')) for k in headers]
+        
+        # Append row
+        try:
+            ws.append_row(values)
+            st.success("✅ Budgets saved to Google Sheets!")
+            return True
+        except Exception as e:
+            st.error(f"❌ Error appending budget row: {str(e)}")
+            return False
+            
+    except Exception as e:
+        st.error(f"❌ Error in save_budgets: {str(e)}")
         return False
 
 def extract_images_from_pdf(pdf_bytes):
@@ -2010,8 +2051,7 @@ with tabs[6]:  # Budgets
         st.session_state.budgets[cat] = budget
     
     if st.button("💾 Save Budgets"):
-        if save_settings_to_gsheet(st.session_state.budgets):
-            st.success("✅ Budgets saved to Google Sheets!")
+        if save_budgets_to_gsheet(st.session_state.budgets):
 
 st.markdown("---")
 st.markdown("💡 **Health & Wealth: Your complete life tracker** - Finances + Health + Nutrition (Data saved in Google Sheets ☁️)")
