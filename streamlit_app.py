@@ -316,25 +316,39 @@ def save_settings_to_gsheet(settings):
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            st.error("❌ Error: Cannot connect to Google Sheets")
             return False
         
         headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
-        ws = get_or_create_worksheet(sheet, "Settings", headers)
         
-        # Validation: Check if we have meaningful data
-        # Note: Salary is now optional - you can track budget without entering it
-        salary_total = safe_float(settings.get('your_salary', 0)) + safe_float(settings.get('wife_salary', 0))
+        # Get or create worksheet
+        try:
+            ws = sheet.worksheet("Settings")
+        except:
+            st.info("Creating 'Settings' worksheet...")
+            ws = sheet.add_worksheet(title="Settings", rows=1000, cols=20)
         
-        # Keep only row 2 (headers in row 1)
-        all_rows = ws.get_all_values()
-        if len(all_rows) > 1:
-            ws.delete_rows(2, len(all_rows))
+        # Clear and add headers
+        try:
+            ws.clear()
+            ws.insert_row(headers, 1)
+        except:
+            pass
         
+        # Prepare data
         values = [str(settings.get(k, '')) for k in headers]
-        ws.append_row(values)
-        return True
+        
+        # Append row
+        try:
+            ws.append_row(values)
+            st.success("✅ Saved to Google Sheets!")
+            return True
+        except Exception as e:
+            st.error(f"❌ Error appending row: {str(e)}")
+            return False
+            
     except Exception as e:
-        st.error(f"Error saving settings: {str(e)}")
+        st.error(f"❌ Error in save_settings: {str(e)}")
         return False
 
 def extract_images_from_pdf(pdf_bytes):
