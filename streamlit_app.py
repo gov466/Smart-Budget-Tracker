@@ -992,15 +992,16 @@ Provide ONLY a JSON response with this structure:
     "overall_status": "Good/Fair/Concerning",
     "warnings": ["High cholesterol", "Elevated blood pressure"],
     "positives": ["Normal kidney function", "Good cholesterol ratio"],
+    "risk_areas": ["Monitor cholesterol trend (family history)", "Watch weight gain patterns"],
     "recommendations": ["Reduce salt intake", "Increase fiber"],
     "diet_guidance": "What food groups to focus on or avoid"
 }}
 
 IMPORTANT:
-- "warnings": ONLY metrics that are OUT OF NORMAL RANGE or concerning
-- "positives": ONLY metrics that are WITHIN NORMAL RANGE or excellent
-- Do NOT include normal values in warnings
-- Do NOT include out-of-range values in positives"""
+- "warnings": ONLY metrics currently OUT OF NORMAL RANGE
+- "positives": ONLY metrics currently WITHIN NORMAL RANGE or excellent
+- "risk_areas": Things to proactively monitor/watch BEFORE they become problems (even if normal now)
+- "recommendations": Actionable steps based on warnings and risk areas"""
         
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -2209,6 +2210,11 @@ with tabs[5]:  # Health
                     st.write("**✅ Positive Findings:**")
                     for positive in latest_analysis.get('positives', []):
                         st.write(f"  • {positive}")
+                
+                if latest_analysis.get('risk_areas'):
+                    st.write("**👁️ Things to Monitor (Proactive):**")
+                    for risk in latest_analysis.get('risk_areas', []):
+                        st.write(f"  • {risk}")
                 
                 st.markdown("**💡 Health Recommendations:**")
                 for rec in latest_analysis.get('recommendations', []):
