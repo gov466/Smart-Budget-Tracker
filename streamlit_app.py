@@ -990,10 +990,17 @@ Metrics:
 Provide ONLY a JSON response with this structure:
 {{
     "overall_status": "Good/Fair/Concerning",
-    "flags": ["High cholesterol", "Good blood pressure"],
+    "warnings": ["High cholesterol", "Elevated blood pressure"],
+    "positives": ["Normal kidney function", "Good cholesterol ratio"],
     "recommendations": ["Reduce salt intake", "Increase fiber"],
     "diet_guidance": "What food groups to focus on or avoid"
-}}"""
+}}
+
+IMPORTANT:
+- "warnings": ONLY metrics that are OUT OF NORMAL RANGE or concerning
+- "positives": ONLY metrics that are WITHIN NORMAL RANGE or excellent
+- Do NOT include normal values in warnings
+- Do NOT include out-of-range values in positives"""
         
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -2193,10 +2200,15 @@ with tabs[5]:  # Health
                 status_emoji = "✅" if status == "Good" else "⚠️" if status == "Fair" else "🔴"
                 st.write(f"**{person_filter}'s Overall Status: {status_emoji} {status}**")
                 
-                if latest_analysis.get('flags'):
-                    st.write("**⚠️ Flags:**")
-                    for flag in latest_analysis.get('flags', []):
-                        st.write(f"  • {flag}")
+                if latest_analysis.get('warnings'):
+                    st.write("**⚠️ Areas to Monitor:**")
+                    for warning in latest_analysis.get('warnings', []):
+                        st.write(f"  • {warning}")
+                
+                if latest_analysis.get('positives'):
+                    st.write("**✅ Positive Findings:**")
+                    for positive in latest_analysis.get('positives', []):
+                        st.write(f"  • {positive}")
                 
                 st.markdown("**💡 Health Recommendations:**")
                 for rec in latest_analysis.get('recommendations', []):
