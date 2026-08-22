@@ -259,7 +259,7 @@ def update_debt_in_gsheet(old_name, new_debt):
         return False
 
 def save_expense_to_gsheet(expense):
-    """Add new expense to Google Sheets"""
+    """Add new expense to Google Sheets (with duplicate prevention)"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
@@ -268,6 +268,27 @@ def save_expense_to_gsheet(expense):
         headers = ['merchant', 'date', 'total', 'category', 'items', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Expenses", headers)
         
+        # Check for duplicates before saving
+        all_data = ws.get_all_records()
+        
+        expense_merchant = str(expense.get('merchant', '')).lower().strip()
+        expense_date = str(expense.get('date', '')).strip()
+        expense_total = safe_float(expense.get('total', 0))
+        
+        # Look for duplicate receipts (same merchant, same date, same total)
+        for existing in all_data:
+            existing_merchant = str(existing.get('merchant', '')).lower().strip()
+            existing_date = str(existing.get('date', '')).strip()
+            existing_total = safe_float(existing.get('total', 0))
+            
+            # Check if this looks like a duplicate
+            if (existing_merchant == expense_merchant and
+                existing_date == expense_date and
+                abs(existing_total - expense_total) < 0.01):  # Allow small floating point differences
+                # Duplicate found! Skip it
+                return False
+        
+        # No duplicate found, safe to add
         # Convert items list to JSON string
         items_json = json.dumps(expense.get('items', []))
         
@@ -409,7 +430,7 @@ def get_shopping_route_recommendation(recommendations):
         return []
 
 def save_health_to_gsheet(health_entry):
-    """Add health metric to Google Sheets"""
+    """Add health metric to Google Sheets (with duplicate prevention)"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
@@ -418,14 +439,30 @@ def save_health_to_gsheet(health_entry):
         headers = ['date', 'metric', 'value', 'unit', 'normal_range', 'type', 'person', 'added_at']
         ws = get_or_create_worksheet(sheet, "Health", headers)
         
+        # Check if this metric already exists
+        all_data = ws.get_all_records()
+        
+        entry_date = health_entry.get('date', '')
+        entry_metric = health_entry.get('metric', '')
+        entry_person = health_entry.get('person', 'Govind')
+        
+        # Look for duplicates
+        for existing in all_data:
+            if (existing.get('date', '') == entry_date and
+                existing.get('metric', '') == entry_metric and
+                existing.get('person', '') == entry_person):
+                # Duplicate found! Skip it
+                return False
+        
+        # No duplicate found, safe to add
         row = [
-            health_entry.get('date', ''),
-            health_entry.get('metric', ''),
+            entry_date,
+            entry_metric,
             health_entry.get('value', ''),
             health_entry.get('unit', ''),
             health_entry.get('normal_range', ''),
             health_entry.get('type', ''),
-            health_entry.get('person', 'Govind'),
+            entry_person,
             health_entry.get('added_at', '')
         ]
         ws.append_row(row)
@@ -1426,6 +1463,8 @@ with tabs[2]:  # Spending
             if pdf_images:
                 st.write(f"✅ Extracted {len(pdf_images)} page(s) from PDF")
                 
+                st.info("✅ **Duplicate Protection:** If you upload a PDF with receipts you've already uploaded, duplicates will be automatically skipped!")
+                
                 if st.button("🤖 Process PDF Receipt"):
                     with st.spinner(f"Processing {len(pdf_images)} page(s)..."):
                         all_receipts = []
@@ -1442,6 +1481,7 @@ with tabs[2]:  # Spending
                             
                             # Process each receipt
                             saved_count = 0
+                            duplicate_count = 0
                             for receipt in all_receipts:
                                 category = categorize_expense(receipt)
                                 receipt['category'] = category
@@ -1450,9 +1490,15 @@ with tabs[2]:  # Spending
                                 if save_expense_to_gsheet(receipt):
                                     st.session_state.expenses.append(receipt)
                                     saved_count += 1
+                                else:
+                                    duplicate_count += 1
                             
-                            st.success(f"✅ {saved_count} receipt(s) processed from PDF!")
-                            st.balloons()
+                            if saved_count > 0:
+                                st.success(f"✅ {saved_count} receipt(s) processed from PDF!")
+                                st.balloons()
+                            
+                            if duplicate_count > 0:
+                                st.warning(f"⚠️ {duplicate_count} receipt(s) from PDF were duplicates and were skipped (prevented)! ✅")
                         else:
                             st.error("❌ Could not extract receipts from PDF. Make sure it contains clear images of receipts.")
             else:
@@ -1462,6 +1508,8 @@ with tabs[2]:  # Spending
         else:
             image = Image.open(uploaded_file)
             st.image(image, use_container_width=True)
+            
+            st.info("✅ **Duplicate Protection:** If you upload the same receipt twice, duplicates will be automatically skipped!")
             
             if st.button("🤖 Process Receipt"):
                 with st.spinner("Processing..."):
@@ -1475,6 +1523,9 @@ with tabs[2]:  # Spending
                         if save_expense_to_gsheet(receipt):
                             st.session_state.expenses.append(receipt)
                             st.success("✅ Receipt processed!")
+                        else:
+                            st.warning(f"⚠️ Receipt from {receipt.get('merchant', 'Unknown')} on {receipt.get('date', 'Unknown')} already exists (duplicate prevented)! ✅\n\nIf this is a new receipt, it may have been uploaded before.")
+                            st.info("💡 Duplicate prevention: Same merchant + date + total = duplicate")
                             col1, col2, col3 = st.columns(3)
                         with col1:
                             st.metric("Store", receipt.get('merchant', 'N/A'))
@@ -2059,6 +2110,7 @@ with tabs[5]:  # Health
     # Show save button only if we have extracted metrics
     if 'extracted_metrics' in st.session_state and st.session_state.get('extracted_metrics'):
         st.markdown(f"**📊 Ready to save {len(st.session_state['extracted_metrics'])} metric(s) from {health_person}'s report**")
+        st.info("✅ **Duplicate Protection:** If this report was already uploaded, duplicates will be automatically skipped!")
         if st.button("💾 Save All Metrics to Google Sheets", key="save_extracted_metrics_btn"):
             saved_count = 0
             for metric in st.session_state['extracted_metrics']:
@@ -2083,7 +2135,9 @@ with tabs[5]:  # Health
                 del st.session_state['extracted_metrics']
                 st.rerun()
             else:
-                st.error("❌ Failed to save metrics. Please try again.")
+                st.warning(f"⚠️ All {len(st.session_state.get('extracted_metrics', []))} metrics already exist in Google Sheets (duplicates prevented)! ✅\n\nYou might have uploaded this report before. If this is NEW data, contact support.")
+                del st.session_state['extracted_metrics']
+                st.rerun()
     
     st.markdown("---")
     
@@ -2183,7 +2237,17 @@ with tabs[5]:  # Health
                 st.divider()
                 
                 # Show all data sorted by date (newest first)
-                sorted_data = sorted(person_data, key=lambda x: x.get('date', ''), reverse=True)
+                def parse_date(date_str):
+                    """Convert date string to sortable format"""
+                    try:
+                        # Handle various date formats
+                        if isinstance(date_str, str):
+                            return datetime.strptime(date_str[:10], '%Y-%m-%d')
+                        return date_str
+                    except:
+                        return datetime.min
+                
+                sorted_data = sorted(person_data, key=lambda x: parse_date(x.get('date', '')), reverse=True)
                 for metric in sorted_data:
                     col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 2])
                     with col1:
