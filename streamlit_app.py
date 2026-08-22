@@ -103,7 +103,7 @@ def load_settings():
         sheet = get_gsheet_client()
         if not sheet:
             return {}
-        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
+        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
         ws = get_or_create_worksheet(sheet, "Settings", headers)
         data = ws.get_all_records()
         if data:
@@ -280,10 +280,133 @@ def save_expense_to_gsheet(expense):
             expense.get('uploaded_at', '')
         ]
         ws.append_row(row)
+        
+        # ALSO save individual items to Price_History for trend analysis
+        save_price_history_to_gsheet(expense)
+        
         return True
     except Exception as e:
         st.error(f"Error saving expense: {str(e)}")
         return False
+
+def save_price_history_to_gsheet(expense):
+    """Save individual items from receipt to Price_History for trend analysis"""
+    try:
+        sheet = get_gsheet_client()
+        if not sheet:
+            return False
+        
+        headers = ['date', 'store', 'product', 'quantity', 'price', 'uploaded_at']
+        ws = get_or_create_worksheet(sheet, "Price_History", headers)
+        
+        merchant = expense.get('merchant', 'Unknown Store')
+        date = expense.get('date', datetime.now().strftime('%Y-%m-%d'))
+        uploaded_at = expense.get('uploaded_at', datetime.now().isoformat())
+        items = expense.get('items', [])
+        
+        # Save each item as separate row
+        for item in items:
+            row = [
+                date,
+                merchant,
+                item.get('name', ''),
+                item.get('quantity', 1),
+                safe_float(item.get('price', 0)),
+                uploaded_at
+            ]
+            ws.append_row(row)
+        
+        return True
+    except Exception as e:
+        st.error(f"Error saving price history: {str(e)}")
+        return False
+
+def load_price_history_from_gsheet():
+    """Load all price history data"""
+    try:
+        sheet = get_gsheet_client()
+        if not sheet:
+            return pd.DataFrame()
+        
+        headers = ['date', 'store', 'product', 'quantity', 'price', 'uploaded_at']
+        ws = get_or_create_worksheet(sheet, "Price_History", headers)
+        
+        data = ws.get_all_values()
+        if len(data) <= 1:  # Only headers
+            return pd.DataFrame(columns=headers)
+        
+        df = pd.DataFrame(data[1:], columns=headers)
+        
+        # Convert data types
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df['price'] = df['price'].apply(lambda x: safe_float(x))
+        df['quantity'] = df['quantity'].apply(lambda x: int(safe_float(x)) if safe_float(x) > 0 else 1)
+        
+        return df
+    except Exception as e:
+        st.error(f"Error loading price history: {str(e)}")
+        return pd.DataFrame()
+
+def analyze_product_price_trends(df, product_name):
+    """Analyze price trends for a specific product"""
+    try:
+        product_data = df[df['product'].str.lower() == product_name.lower()]
+        
+        if product_data.empty:
+            return None
+        
+        by_store = product_data.groupby('store')['price'].agg([
+            'mean',
+            'count',
+            'min',
+            'max'
+        ]).round(2)
+        
+        return by_store
+    except:
+        return None
+
+def get_cheapest_stores_for_products(df):
+    """Find cheapest store for each product"""
+    try:
+        recommendations = {}
+        
+        for product in df['product'].unique():
+            product_data = df[df['product'] == product]
+            cheapest = product_data.loc[product_data['price'].idxmin()]
+            
+            recommendations[product] = {
+                'store': cheapest['store'],
+                'avg_price': product_data.groupby('store')['price'].mean()[cheapest['store']],
+                'times_bought': len(product_data),
+                'all_stores': product_data.groupby('store')['price'].mean().to_dict()
+            }
+        
+        return recommendations
+    except:
+        return {}
+
+def get_shopping_route_recommendation(recommendations):
+    """Create optimized shopping route based on price history"""
+    try:
+        # Group products by their cheapest store
+        route = {}
+        for product, info in recommendations.items():
+            store = info['store']
+            if store not in route:
+                route[store] = []
+            route[store].append({
+                'product': product,
+                'price': info['avg_price'],
+                'times_bought': info['times_bought']
+            })
+        
+        # Sort stores by number of items (visit store with most items first)
+        sorted_route = sorted(route.items(), key=lambda x: len(x[1]), reverse=True)
+        
+        return sorted_route
+    except:
+        return []
 
 def save_health_to_gsheet(health_entry):
     """Add health metric to Google Sheets"""
@@ -319,7 +442,7 @@ def save_settings_to_gsheet(settings):
             st.error("❌ Error: Cannot connect to Google Sheets")
             return False
         
-        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_groceries_budget', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
+        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
         
         # Get or create worksheet
         try:
@@ -1093,7 +1216,7 @@ if 'extracted_metrics' not in st.session_state:
 st.title("🏥 Health & Wealth Tracker")
 st.markdown("Complete life management: Finance + Health + Smart Nutrition (Data in Google Sheets ☁️)")
 
-tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "📊 Wealth", "🏥 Health", "🥗 Smart Grocery", "🎯 Budgets"])
+tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🥗 Smart Grocery", "🎯 Budgets"])
 
 with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
@@ -1119,7 +1242,6 @@ with tabs[0]:  # Setup
         'fixed_health_insurance': 'Health Insurance',
         'fixed_mobile': 'Mobile/Phone',
         'fixed_utilities': 'Utilities (Hydro, Gas, Internet)',
-        'fixed_groceries_budget': 'Groceries Budget',
         'fixed_tfsa': 'TFSA Transfer',
         'fixed_rrsp': 'RRSP Transfer',
         'fixed_india_transfer': 'Money to India',
@@ -1371,7 +1493,210 @@ with tabs[2]:  # Spending
                     else:
                         st.error("Error saving receipt to Google Sheets")
 
-with tabs[3]:  # Wealth Dashboard
+with tabs[3]:  # Shopping Analytics
+    st.markdown("### 🛒 Shopping Analytics & Price Trends")
+    
+    # Load price history
+    price_history = load_price_history_from_gsheet()
+    
+    if price_history.empty:
+        st.info("📊 No price history yet! Upload receipts to start tracking prices.")
+    else:
+        st.success(f"✅ Tracking {len(price_history)} items from {price_history['store'].nunique()} stores")
+        
+        # Tab 1: Product Price Analysis
+        sub_tabs = st.tabs(["📈 Product Trends", "🏪 Store Comparison", "🎯 Shopping Guide", "💰 Savings Potential"])
+        
+        with sub_tabs[0]:  # Product Trends
+            st.markdown("#### 📈 Price Trends by Product")
+            
+            products = sorted(price_history['product'].unique())
+            selected_product = st.selectbox("Select Product", products, key="product_select")
+            
+            product_analysis = analyze_product_price_trends(price_history, selected_product)
+            
+            if product_analysis is not None:
+                st.markdown(f"**{selected_product}** - Price Analysis")
+                
+                # Display analysis table
+                col1, col2, col3, col4, col5 = st.columns(5)
+                with col1:
+                    st.metric("📊 Data Points", len(product_analysis))
+                with col2:
+                    avg_price = product_analysis['mean'].mean()
+                    st.metric("💰 Avg Price", f"${avg_price:.2f}")
+                with col3:
+                    cheapest = product_analysis['mean'].min()
+                    st.metric("🏆 Cheapest", f"${cheapest:.2f}")
+                with col4:
+                    most_expensive = product_analysis['mean'].max()
+                    st.metric("❌ Most Expensive", f"${most_expensive:.2f}")
+                with col5:
+                    savings = most_expensive - cheapest
+                    st.metric("💵 Savings/Unit", f"${savings:.2f}")
+                
+                st.markdown("---")
+                
+                # Display by store
+                st.write("**By Store:**")
+                for store in product_analysis.index:
+                    row = product_analysis.loc[store]
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.write(f"**{store}**")
+                    with col2:
+                        st.write(f"Avg: ${row['mean']:.2f}")
+                    with col3:
+                        st.write(f"Times: {int(row['count'])}")
+                    with col4:
+                        price_range = f"${row['min']:.2f}-${row['max']:.2f}"
+                        st.write(f"Range: {price_range}")
+                
+                # Visualization
+                chart_data = product_analysis[['mean']].sort_values('mean', ascending=False)
+                st.bar_chart(chart_data)
+        
+        with sub_tabs[1]:  # Store Comparison
+            st.markdown("#### 🏪 Which Stores Have the Best Prices?")
+            
+            # Get recommendations
+            recommendations = get_cheapest_stores_for_products(price_history)
+            
+            if recommendations:
+                # Count products per store
+                store_stats = {}
+                for product, info in recommendations.items():
+                    store = info['store']
+                    if store not in store_stats:
+                        store_stats[store] = {'count': 0, 'products': []}
+                    store_stats[store]['count'] += 1
+                    store_stats[store]['products'].append(product)
+                
+                # Display store stats
+                col1, col2, col3 = st.columns(3)
+                
+                sorted_stores = sorted(store_stats.items(), key=lambda x: x[1]['count'], reverse=True)
+                
+                for idx, (store, info) in enumerate(sorted_stores):
+                    if idx % 3 == 0:
+                        col1, col2, col3 = st.columns(3)
+                    
+                    with [col1, col2, col3][idx % 3]:
+                        st.metric(
+                            f"🏪 {store}",
+                            f"Cheapest for {info['count']} items"
+                        )
+                
+                st.markdown("---")
+                
+                # Detailed breakdown
+                st.write("**Detailed Store Comparison:**")
+                
+                all_stores = sorted(price_history['store'].unique())
+                comparison_data = []
+                
+                for product in price_history['product'].unique():
+                    product_prices = {}
+                    for store in all_stores:
+                        store_prices = price_history[
+                            (price_history['product'] == product) & 
+                            (price_history['store'] == store)
+                        ]['price']
+                        
+                        if len(store_prices) > 0:
+                            product_prices[store] = store_prices.mean()
+                        else:
+                            product_prices[store] = None
+                    
+                    comparison_data.append({'product': product, **product_prices})
+                
+                comparison_df = pd.DataFrame(comparison_data)
+                st.dataframe(comparison_df, use_container_width=True)
+        
+        with sub_tabs[2]:  # Shopping Guide
+            st.markdown("#### 🎯 Smart Shopping Guide")
+            
+            recommendations = get_cheapest_stores_for_products(price_history)
+            route = get_shopping_route_recommendation(recommendations)
+            
+            if route:
+                st.success("✅ Optimized Shopping Route")
+                
+                total_potential_savings = 0
+                
+                for i, (store, products) in enumerate(route, 1):
+                    st.markdown(f"**{i}. Visit: {store}**")
+                    
+                    store_savings = 0
+                    
+                    for item in sorted(products, key=lambda x: x['price'], reverse=True):
+                        product = item['product']
+                        price = item['price']
+                        times_bought = item['times_bought']
+                        
+                        # Find most expensive price for this product
+                        all_prices = recommendations[product]['all_stores'].values()
+                        most_expensive = max(all_prices)
+                        savings = most_expensive - price
+                        
+                        store_savings += savings
+                        
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        with col1:
+                            st.write(f"   • {product}")
+                        with col2:
+                            st.write(f"${price:.2f}")
+                        with col3:
+                            st.write(f"Save ${savings:.2f}")
+                    
+                    st.write(f"   **Subtotal savings: ${store_savings:.2f}**")
+                    st.markdown("---")
+                    total_potential_savings += store_savings
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("🎯 Stores to Visit", len(route))
+                with col2:
+                    st.metric("📦 Products to Track", len(recommendations))
+                with col3:
+                    st.metric("💰 Potential Savings", f"${total_potential_savings:.2f}")
+        
+        with sub_tabs[3]:  # Savings Potential
+            st.markdown("#### 💰 Your Savings Potential")
+            
+            if not price_history.empty:
+                # Calculate what you spent vs what you could save
+                recommendations = get_cheapest_stores_for_products(price_history)
+                
+                total_spent = 0
+                total_optimal = 0
+                
+                for product, info in recommendations.items():
+                    product_data = price_history[price_history['product'] == product]
+                    actual_spent = (product_data['price'] * product_data['quantity']).sum()
+                    optimal_spent = info['avg_price'] * product_data['quantity'].sum()
+                    
+                    total_spent += actual_spent
+                    total_optimal += optimal_spent
+                
+                savings = total_spent - total_optimal
+                savings_percent = (savings / total_spent * 100) if total_spent > 0 else 0
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("💸 Total Spent", f"${total_spent:.2f}")
+                with col2:
+                    st.metric("💵 Could Spend", f"${total_optimal:.2f}")
+                with col3:
+                    st.metric("💰 Potential Savings", f"${savings:.2f}")
+                with col4:
+                    st.metric("📊 Savings %", f"{savings_percent:.1f}%")
+                
+                st.markdown("---")
+                st.info(f"💡 By shopping smarter (at cheapest stores), you could save **${savings:.2f}** on your grocery trips!")
+
+with tabs[4]:  # Wealth Dashboard
     st.markdown("### 📊 Complete Financial Dashboard")
     
     # Month selector
@@ -1655,7 +1980,7 @@ with tabs[3]:  # Wealth Dashboard
     else:
         st.info("No historical spending data yet. Upload receipts to see trends!")
 
-with tabs[4]:  # Health
+with tabs[5]:  # Health
     st.markdown("### 🏥 Health Tracking & Analysis with Trends")
     
     st.markdown("#### 👤 Whose health data?")
@@ -1954,7 +2279,7 @@ with tabs[4]:  # Health
     else:
         st.info("📋 Need health data for BOTH Govind and Amrithavarshini to show household recommendations. Upload health reports for both!")
 
-with tabs[5]:  # Smart Grocery
+with tabs[6]:  # Smart Grocery
     st.markdown("### 🥗 Smart Grocery Recommendations")
     
     if st.session_state.expenses:
@@ -2040,7 +2365,7 @@ with tabs[5]:  # Smart Grocery
     else:
         st.info("📸 No grocery data. Upload receipts to get smart recommendations!")
 
-with tabs[6]:  # Budgets
+with tabs[7]:  # Budgets
     st.markdown("### 🎯 Set Monthly Budgets")
     
     categories = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
