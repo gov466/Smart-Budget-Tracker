@@ -1580,6 +1580,21 @@ with tabs[0]:  # Setup
     for key, label in fixed_items.items():
         fixed_values[key] = st.number_input(label, min_value=0.0, value=safe_float(st.session_state.settings.get(key, 0)), step=50.0)
     
+    st.markdown("#### 💾 Retirement Savings Start Date")
+    st.info("📅 When did you start contributing to TFSA & RRSP? This helps us calculate your cumulative retirement savings correctly.")
+    
+    # Get the start date from settings or use default
+    tfsa_rrsp_start_str = st.session_state.settings.get('tfsa_rrsp_start_date', '')
+    if tfsa_rrsp_start_str:
+        try:
+            tfsa_rrsp_start = datetime.strptime(tfsa_rrsp_start_str, '%Y-%m-%d').date()
+        except:
+            tfsa_rrsp_start = datetime(2024, 9, 1).date()  # Default to Sep 2024
+    else:
+        tfsa_rrsp_start = datetime(2024, 9, 1).date()  # Default to Sep 2024
+    
+    tfsa_rrsp_start_date = st.date_input("TFSA & RRSP Start Date", value=tfsa_rrsp_start, key="tfsa_rrsp_start_date_input")
+    
     st.markdown("#### 📅 Annual/Yearly Expenses (Calculated Monthly Equivalent)")
     st.info("💡 Enter yearly costs - we'll automatically calculate the monthly equivalent to add to your budget!")
     
@@ -1610,6 +1625,7 @@ with tabs[0]:  # Setup
             with st.spinner("Saving to Google Sheets..."):
                 st.session_state.settings['your_salary'] = your_sal
                 st.session_state.settings['wife_salary'] = wife_sal
+                st.session_state.settings['tfsa_rrsp_start_date'] = tfsa_rrsp_start_date.strftime('%Y-%m-%d')
                 for key, val in fixed_values.items():
                     st.session_state.settings[key] = val
                 for key, val in annual_values.items():
@@ -2049,27 +2065,18 @@ with tabs[4]:  # Wealth Dashboard
     rrsp_monthly = safe_float(st.session_state.settings.get('fixed_rrsp', 0))
     total_monthly_savings = tfsa_monthly + rrsp_monthly
     
-    # Calculate months of contributions
-    today = datetime.now()
-    # Count months from earliest expense or 1 year default
-    months_contributing = 12  # Default to 1 year
+    # Calculate months from TFSA/RRSP start date
+    tfsa_rrsp_start_str = st.session_state.settings.get('tfsa_rrsp_start_date', '')
+    if tfsa_rrsp_start_str:
+        try:
+            tfsa_rrsp_start = pd.to_datetime(tfsa_rrsp_start_str)
+        except:
+            tfsa_rrsp_start = pd.Timestamp(datetime(2024, 9, 1))
+    else:
+        tfsa_rrsp_start = pd.Timestamp(datetime(2024, 9, 1))
     
-    if st.session_state.expenses:
-        dates = []
-        for exp in st.session_state.expenses:
-            try:
-                exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
-                dates.append(exp_date)
-            except:
-                pass
-        if dates:
-            earliest_date = min(dates)
-            months_contributing = max(1, (today - earliest_date).days // 30)
-    
-    # Calculate cumulative savings
-    tfsa_cumulative = tfsa_monthly * months_contributing
-    rrsp_cumulative = rrsp_monthly * months_contributing
-    total_cumulative = tfsa_cumulative + rrsp_cumulative
+    today_ts = pd.Timestamp(datetime.now())
+    months_contributing = max(1, (today_ts - tfsa_rrsp_start).days // 30)
     
     # Display metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -2083,11 +2090,17 @@ with tabs[4]:  # Wealth Dashboard
         st.metric("💰 Total Monthly Savings", f"${total_monthly_savings:.2f}")
     
     # Show cumulative totals
+    tfsa_cumulative = tfsa_monthly * months_contributing
+    rrsp_cumulative = rrsp_monthly * months_contributing
+    total_cumulative = tfsa_cumulative + rrsp_cumulative
+    
+    start_date_str = tfsa_rrsp_start.strftime('%b %Y')
+    
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("🏦 TFSA Cumulative", f"${tfsa_cumulative:,.2f}", f"Since {(today - pd.Timedelta(days=30*months_contributing)).strftime('%b %Y')}")
+        st.metric("🏦 TFSA Cumulative", f"${tfsa_cumulative:,.2f}", f"Since {start_date_str}")
     with col2:
-        st.metric("📊 RRSP Cumulative", f"${rrsp_cumulative:,.2f}", f"Since {(today - pd.Timedelta(days=30*months_contributing)).strftime('%b %Y')}")
+        st.metric("📊 RRSP Cumulative", f"${rrsp_cumulative:,.2f}", f"Since {start_date_str}")
     with col3:
         st.metric("🎯 Total Retirement Savings", f"${total_cumulative:,.2f}", f"+${total_monthly_savings:.2f}/month")
     
@@ -3134,12 +3147,16 @@ with tabs[8]:  # Fertility Tracker
         with col2:
             period_end = st.date_input("Period End Date", value=None, key="period_end")
         with col3:
-            cervical_fluid = st.selectbox("Cervical Fluid (Peak Day)", ["Dry", "Sticky", "Creamy", "Watery"], key="cervical_fluid")
+            # NEW: Manual cycle length input
+            manual_cycle_length = st.number_input("Cycle Length (days)", min_value=21, max_value=45, value=28, step=1, key="manual_cycle_length",
+                                                 help="Total days from start of this period to start of next period (typically 21-45 days)")
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            temperature = st.number_input("Basal Temperature (°C) - Optional", min_value=36.0, max_value=38.0, value=36.5, step=0.1, key="temp_input")
+            cervical_fluid = st.selectbox("Cervical Fluid (Peak Day)", ["Dry", "Sticky", "Creamy", "Watery"], key="cervical_fluid")
         with col2:
+            temperature = st.number_input("Basal Temperature (°C) - Optional", min_value=36.0, max_value=38.0, value=36.5, step=0.1, key="temp_input")
+        with col3:
             temperature = None if temperature == 36.5 else temperature
         
         symptoms = st.multiselect(
@@ -3153,7 +3170,8 @@ with tabs[8]:  # Fertility Tracker
         if st.button("💾 Save Cycle Data"):
             if period_start and period_end:
                 if period_end >= period_start:
-                    cycle_length = (period_end - period_start).days + 1
+                    # Use manual cycle length input instead of calculating from dates
+                    cycle_length = int(manual_cycle_length)
                     
                     cycle_data = {
                         'date_start': period_start.strftime("%Y-%m-%d"),
@@ -3166,8 +3184,9 @@ with tabs[8]:  # Fertility Tracker
                     }
                     
                     if save_cycle_to_gsheet(cycle_data):
-                        st.success("✅ Cycle saved successfully!")
+                        st.success(f"✅ Cycle saved successfully! (Cycle length: {cycle_length} days)")
                         fertility_cycles = load_fertility_cycles()
+                        st.rerun()
                     else:
                         st.warning("⚠️ This cycle start date already exists!")
                 else:
@@ -3187,6 +3206,11 @@ with tabs[8]:  # Fertility Tracker
                     with col2:
                         st.write(f"**Symptoms:** {cycle.get('symptoms', 'None logged')}")
                         st.write(f"**Notes:** {cycle.get('notes', 'No notes')}")
+                    
+                    # Delete button
+                    if st.button(f"🗑️ Delete this cycle", key=f"del_cycle_{cycle.get('date_start')}"):
+                        st.info("📝 Note: To delete, go to Google Sheets 'Fertility Cycles' and delete the row manually, then refresh the app.")
+                        st.markdown("[Open Google Sheets Fertility Tracker](https://docs.google.com/spreadsheets/d/1tzRTNtq3N-QPabBSowhmzYXuxHR9bimvYTn1z0wjuQs/edit#gid=0)")
     
     # Tab 2: Cycle Analysis
     with fert_tabs[1]:
