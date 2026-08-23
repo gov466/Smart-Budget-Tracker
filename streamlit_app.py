@@ -3141,15 +3141,44 @@ with tabs[8]:  # Fertility Tracker
     with fert_tabs[0]:
         st.markdown("#### Add New Menstrual Cycle")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             period_start = st.date_input("Period Start Date", value=None, key="period_start")
         with col2:
             period_end = st.date_input("Period End Date", value=None, key="period_end")
-        with col3:
-            # NEW: Manual cycle length input
-            manual_cycle_length = st.number_input("Cycle Length (days)", min_value=21, max_value=45, value=28, step=1, key="manual_cycle_length",
-                                                 help="Total days from start of this period to start of next period (typically 21-45 days)")
+        
+        # AUTO-CALCULATE cycle length from previous period
+        calculated_cycle_length = 28  # Default
+        if period_start and fertility_cycles:
+            # Find the most recent previous cycle
+            cycle_dates = []
+            for cycle in fertility_cycles:
+                try:
+                    start_date = pd.to_datetime(cycle.get('date_start', ''))
+                    cycle_dates.append(start_date)
+                except:
+                    pass
+            
+            if cycle_dates:
+                most_recent_previous = max(cycle_dates)
+                # Calculate: Current period start - Previous period start = cycle length
+                calculated_cycle_length = (pd.Timestamp(period_start) - most_recent_previous).days
+                if calculated_cycle_length <= 0:
+                    calculated_cycle_length = 28
+        
+        # Show auto-calculated cycle length
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.info(f"📊 **Auto-Calculated Cycle Length:** `{calculated_cycle_length} days`")
+        with col2:
+            manual_override = st.checkbox("Override?", key="override_cycle_length", 
+                                        help="Check if you want to manually set a different cycle length")
+        
+        if manual_override:
+            cycle_length = st.slider("Your Cycle Length (days)", min_value=21, max_value=50, 
+                                    value=calculated_cycle_length, step=1, key="cycle_length_slider")
+        else:
+            cycle_length = calculated_cycle_length
         
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -3170,9 +3199,7 @@ with tabs[8]:  # Fertility Tracker
         if st.button("💾 Save Cycle Data"):
             if period_start and period_end:
                 if period_end >= period_start:
-                    # Use manual cycle length input instead of calculating from dates
-                    cycle_length = int(manual_cycle_length)
-                    
+                    # Use auto-calculated cycle length (or manually overridden)
                     cycle_data = {
                         'date_start': period_start.strftime("%Y-%m-%d"),
                         'date_end': period_end.strftime("%Y-%m-%d"),
