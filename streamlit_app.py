@@ -159,6 +159,7 @@ def load_debts():
         st.error(f"Error loading debts: {str(e)}")
         return []
 
+@st.cache_data(ttl=600)  # Cache for 10 minutes
 def load_health():
     """Load health metrics from Google Sheets"""
     try:
@@ -2387,8 +2388,8 @@ with tabs[6]:  # Fitness Plan
     st.markdown("### 🏋️ Personalized Fitness Plans")
     st.info("📊 Based on your latest health analysis, here are recommended home exercises!")
     
-    # Get health data for both people
-    health_records = load_health_data_from_gsheet()
+    # Get health data for both people (cached for 10 minutes)
+    health_records = load_health()
     
     if not health_records:
         st.warning("⚠️ No health data found. Upload health reports first to get personalized fitness recommendations!")
