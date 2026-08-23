@@ -159,7 +159,6 @@ def load_debts():
         st.error(f"Error loading debts: {str(e)}")
         return []
 
-@st.cache_data(ttl=600)  # Cache for 10 minutes
 def load_health():
     """Load health metrics from Google Sheets"""
     try:
@@ -2404,44 +2403,74 @@ with tabs[6]:  # Fitness Plan
         with col1:
             st.markdown("#### 👨 Govind's Fitness Plan")
             if govind_data:
-                analysis = analyze_health_metrics(govind_data)
-                if analysis and analysis.get('exercise_plan'):
-                    exercise_plan = analysis['exercise_plan']
-                    st.write(f"**Frequency:** {exercise_plan.get('frequency', 'N/A')}")
-                    st.write(f"**Duration:** {exercise_plan.get('duration_per_session', 'N/A')} per session")
+                with st.spinner("🔄 Analyzing health metrics..."):
+                    analysis = analyze_health_metrics(govind_data)
+                
+                if analysis:
+                    st.write(f"**Analysis Status:** {analysis.get('overall_status', 'Unknown')}")
                     
-                    st.markdown("**Recommended Exercises:**")
-                    for idx, exercise in enumerate(exercise_plan.get('exercises', []), 1):
-                        with st.expander(f"**{idx}. {exercise.get('name')}** ({exercise.get('duration')})"):
-                            st.write(exercise.get('description', 'No description available'))
-                            youtube_search = exercise.get('youtube_search', '')
-                            if youtube_search:
-                                st.markdown(f"🔗 **YouTube Search:** `{youtube_search}`")
-                                st.link_button("🎬 Search on YouTube", f"https://www.youtube.com/results?search_query={youtube_search.replace(' ', '+')}")
+                    if analysis.get('exercise_plan'):
+                        exercise_plan = analysis['exercise_plan']
+                        st.write(f"**Frequency:** {exercise_plan.get('frequency', 'N/A')}")
+                        st.write(f"**Duration:** {exercise_plan.get('duration_per_session', 'N/A')} per session")
+                        
+                        st.markdown("**Recommended Exercises:**")
+                        for idx, exercise in enumerate(exercise_plan.get('exercises', []), 1):
+                            with st.expander(f"**{idx}. {exercise.get('name')}** ({exercise.get('duration')})"):
+                                st.write(exercise.get('description', 'No description available'))
+                                youtube_search = exercise.get('youtube_search', '')
+                                if youtube_search:
+                                    st.markdown(f"🔗 **YouTube Search:** `{youtube_search}`")
+                                    st.link_button("🎬 Search on YouTube", f"https://www.youtube.com/results?search_query={youtube_search.replace(' ', '+')}")
+                    else:
+                        st.warning("⚠️ Claude didn't generate exercise plan. This might be a temporary issue.")
+                        st.info("💡 Try refreshing the page or uploading a new health report to regenerate the fitness plan.")
+                        # Show what Claude DID return
+                        with st.expander("🔍 Debug: What Claude Returned"):
+                            st.write(f"Overall Status: {analysis.get('overall_status', 'N/A')}")
+                            st.write(f"Has warnings: {bool(analysis.get('warnings'))}")
+                            st.write(f"Has positives: {bool(analysis.get('positives'))}")
+                            st.write(f"Has exercise_plan: {bool(analysis.get('exercise_plan'))}")
+                            st.write(f"Full response keys: {list(analysis.keys())}")
                 else:
-                    st.info("No fitness plan available yet. Please upload more health data.")
+                    st.error("❌ Failed to analyze health data. Check your Anthropic API key!")
             else:
                 st.info("No health data for Govind. Upload health reports first!")
         
         with col2:
             st.markdown("#### 👩 Amrithavarshini's Fitness Plan")
             if amrithavarshini_data:
-                analysis = analyze_health_metrics(amrithavarshini_data)
-                if analysis and analysis.get('exercise_plan'):
-                    exercise_plan = analysis['exercise_plan']
-                    st.write(f"**Frequency:** {exercise_plan.get('frequency', 'N/A')}")
-                    st.write(f"**Duration:** {exercise_plan.get('duration_per_session', 'N/A')} per session")
+                with st.spinner("🔄 Analyzing health metrics..."):
+                    analysis = analyze_health_metrics(amrithavarshini_data)
+                
+                if analysis:
+                    st.write(f"**Analysis Status:** {analysis.get('overall_status', 'Unknown')}")
                     
-                    st.markdown("**Recommended Exercises:**")
-                    for idx, exercise in enumerate(exercise_plan.get('exercises', []), 1):
-                        with st.expander(f"**{idx}. {exercise.get('name')}** ({exercise.get('duration')})"):
-                            st.write(exercise.get('description', 'No description available'))
-                            youtube_search = exercise.get('youtube_search', '')
-                            if youtube_search:
-                                st.markdown(f"🔗 **YouTube Search:** `{youtube_search}`")
-                                st.link_button("🎬 Search on YouTube", f"https://www.youtube.com/results?search_query={youtube_search.replace(' ', '+')}")
+                    if analysis.get('exercise_plan'):
+                        exercise_plan = analysis['exercise_plan']
+                        st.write(f"**Frequency:** {exercise_plan.get('frequency', 'N/A')}")
+                        st.write(f"**Duration:** {exercise_plan.get('duration_per_session', 'N/A')} per session")
+                        
+                        st.markdown("**Recommended Exercises:**")
+                        for idx, exercise in enumerate(exercise_plan.get('exercises', []), 1):
+                            with st.expander(f"**{idx}. {exercise.get('name')}** ({exercise.get('duration')})"):
+                                st.write(exercise.get('description', 'No description available'))
+                                youtube_search = exercise.get('youtube_search', '')
+                                if youtube_search:
+                                    st.markdown(f"🔗 **YouTube Search:** `{youtube_search}`")
+                                    st.link_button("🎬 Search on YouTube", f"https://www.youtube.com/results?search_query={youtube_search.replace(' ', '+')}")
+                    else:
+                        st.warning("⚠️ Claude didn't generate exercise plan. This might be a temporary issue.")
+                        st.info("💡 Try refreshing the page or uploading a new health report to regenerate the fitness plan.")
+                        # Show what Claude DID return
+                        with st.expander("🔍 Debug: What Claude Returned"):
+                            st.write(f"Overall Status: {analysis.get('overall_status', 'N/A')}")
+                            st.write(f"Has warnings: {bool(analysis.get('warnings'))}")
+                            st.write(f"Has positives: {bool(analysis.get('positives'))}")
+                            st.write(f"Has exercise_plan: {bool(analysis.get('exercise_plan'))}")
+                            st.write(f"Full response keys: {list(analysis.keys())}")
                 else:
-                    st.info("No fitness plan available yet. Please upload more health data.")
+                    st.error("❌ Failed to analyze health data. Check your Anthropic API key!")
             else:
                 st.info("No health data for Amrithavarshini. Upload health reports first!")
 
