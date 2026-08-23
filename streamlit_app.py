@@ -2795,7 +2795,7 @@ with tabs[7]:  # Daily Wellness Log
         symptoms = st.multiselect(
             "Any Symptoms? (Select all that apply)",
             ["Headache", "Nausea", "Dizziness", "Fatigue", "Cramps", "Bloating", "Fever", "Cough", "None"],
-            key="symptoms_select"
+            key="wellness_symptoms_select"
         )
         
         # Medications & Steps
