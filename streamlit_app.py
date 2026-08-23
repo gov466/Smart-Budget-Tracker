@@ -994,14 +994,36 @@ Provide ONLY a JSON response with this structure:
     "positives": ["Normal kidney function", "Good cholesterol ratio"],
     "risk_areas": ["Monitor cholesterol trend (family history)", "Watch weight gain patterns"],
     "recommendations": ["Reduce salt intake", "Increase fiber"],
-    "diet_guidance": "What food groups to focus on or avoid"
+    "diet_guidance": "What food groups to focus on or avoid",
+    "exercise_plan": {{
+        "frequency": "4-5 times per week",
+        "duration_per_session": "30-45 minutes",
+        "exercises": [
+            {{
+                "name": "Brisk Walking",
+                "duration": "20-30 mins",
+                "description": "Walking at a pace where you can talk but not sing. Great for heart health and low impact.",
+                "youtube_search": "Brisk walking routine 20 minutes"
+            }},
+            {{
+                "name": "Home Yoga",
+                "duration": "15-20 mins",
+                "description": "Gentle stretching and balance exercises. Reduces stress and improves flexibility.",
+                "youtube_search": "Beginner home yoga 20 minutes"
+            }}
+        ]
+    }}
 }}
 
 IMPORTANT:
+- "exercise_plan": Create personalized home workouts based on their health metrics
+- Suggest ONLY home-friendly exercises (no gym equipment needed or minimal)
+- Include 3-4 exercises suitable for their condition
+- "youtube_search": Provide search terms users can copy into YouTube (they'll find videos)
+- All exercises should be safe for their health condition
 - "warnings": ONLY metrics currently OUT OF NORMAL RANGE
 - "positives": ONLY metrics currently WITHIN NORMAL RANGE or excellent
-- "risk_areas": Things to proactively monitor/watch BEFORE they become problems (even if normal now)
-- "recommendations": Actionable steps based on warnings and risk areas"""
+- "risk_areas": Things to proactively monitor even if normal now"""
         
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -1261,7 +1283,7 @@ if 'extracted_metrics' not in st.session_state:
 st.title("🏥 Health & Wealth Tracker")
 st.markdown("Complete life management: Finance + Health + Smart Nutrition (Data in Google Sheets ☁️)")
 
-tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🥗 Smart Grocery", "🎯 Budgets"])
+tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🏋️ Fitness Plan", "🥗 Smart Grocery", "🎯 Budgets"])
 
 with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
@@ -2361,7 +2383,68 @@ with tabs[5]:  # Health
     else:
         st.info("📋 Need health data for BOTH Govind and Amrithavarshini to show household recommendations. Upload health reports for both!")
 
-with tabs[6]:  # Smart Grocery
+with tabs[6]:  # Fitness Plan
+    st.markdown("### 🏋️ Personalized Fitness Plans")
+    st.info("📊 Based on your latest health analysis, here are recommended home exercises!")
+    
+    # Get health data for both people
+    health_records = load_health_data_from_gsheet()
+    
+    if not health_records:
+        st.warning("⚠️ No health data found. Upload health reports first to get personalized fitness recommendations!")
+    else:
+        # Separate data by person
+        govind_data = [h for h in health_records if h.get('person') == 'Govind']
+        amrithavarshini_data = [h for h in health_records if h.get('person') == 'Amrithavarshini']
+        
+        # Create columns for side-by-side display
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 👨 Govind's Fitness Plan")
+            if govind_data:
+                analysis = analyze_health_metrics(govind_data)
+                if analysis and analysis.get('exercise_plan'):
+                    exercise_plan = analysis['exercise_plan']
+                    st.write(f"**Frequency:** {exercise_plan.get('frequency', 'N/A')}")
+                    st.write(f"**Duration:** {exercise_plan.get('duration_per_session', 'N/A')} per session")
+                    
+                    st.markdown("**Recommended Exercises:**")
+                    for idx, exercise in enumerate(exercise_plan.get('exercises', []), 1):
+                        with st.expander(f"**{idx}. {exercise.get('name')}** ({exercise.get('duration')})"):
+                            st.write(exercise.get('description', 'No description available'))
+                            youtube_search = exercise.get('youtube_search', '')
+                            if youtube_search:
+                                st.markdown(f"🔗 **YouTube Search:** `{youtube_search}`")
+                                st.link_button("🎬 Search on YouTube", f"https://www.youtube.com/results?search_query={youtube_search.replace(' ', '+')}")
+                else:
+                    st.info("No fitness plan available yet. Please upload more health data.")
+            else:
+                st.info("No health data for Govind. Upload health reports first!")
+        
+        with col2:
+            st.markdown("#### 👩 Amrithavarshini's Fitness Plan")
+            if amrithavarshini_data:
+                analysis = analyze_health_metrics(amrithavarshini_data)
+                if analysis and analysis.get('exercise_plan'):
+                    exercise_plan = analysis['exercise_plan']
+                    st.write(f"**Frequency:** {exercise_plan.get('frequency', 'N/A')}")
+                    st.write(f"**Duration:** {exercise_plan.get('duration_per_session', 'N/A')} per session")
+                    
+                    st.markdown("**Recommended Exercises:**")
+                    for idx, exercise in enumerate(exercise_plan.get('exercises', []), 1):
+                        with st.expander(f"**{idx}. {exercise.get('name')}** ({exercise.get('duration')})"):
+                            st.write(exercise.get('description', 'No description available'))
+                            youtube_search = exercise.get('youtube_search', '')
+                            if youtube_search:
+                                st.markdown(f"🔗 **YouTube Search:** `{youtube_search}`")
+                                st.link_button("🎬 Search on YouTube", f"https://www.youtube.com/results?search_query={youtube_search.replace(' ', '+')}")
+                else:
+                    st.info("No fitness plan available yet. Please upload more health data.")
+            else:
+                st.info("No health data for Amrithavarshini. Upload health reports first!")
+
+with tabs[7]:  # Smart Grocery
     st.markdown("### 🥗 Smart Grocery Recommendations")
     
     if st.session_state.expenses:
@@ -2447,7 +2530,7 @@ with tabs[6]:  # Smart Grocery
     else:
         st.info("📸 No grocery data. Upload receipts to get smart recommendations!")
 
-with tabs[7]:  # Budgets
+with tabs[8]:  # Budgets
     st.markdown("### 🎯 Set Monthly Budgets")
     
     categories = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
