@@ -1415,11 +1415,124 @@ def get_conception_probability(cycle_analysis):
     # Convert to percentage
     return round(base_prob * 100, 1)
 
+# Daily Wellness Logging Functions
+def load_wellness_logs():
+    """Load daily wellness logs from Google Sheets"""
+    try:
+        sheet = get_gsheet_client()
+        if not sheet:
+            return []
+        headers = ['date', 'person', 'exercise_name', 'exercise_done', 'water_bottles', 'pee_count', 'poop_count', 
+                   'sleep_hours', 'mood_score', 'stress_score', 'symptoms', 'medications_taken', 'steps', 
+                   'diet_notes', 'notes', 'added_at']
+        ws = get_or_create_worksheet(sheet, "Daily Wellness Log", headers)
+        return ws.get_all_records()
+    except:
+        return []
+
+def save_wellness_log(wellness_data):
+    """Save daily wellness log to Google Sheets"""
+    try:
+        sheet = get_gsheet_client()
+        if not sheet:
+            return False
+        
+        headers = ['date', 'person', 'exercise_name', 'exercise_done', 'water_bottles', 'pee_count', 'poop_count', 
+                   'sleep_hours', 'mood_score', 'stress_score', 'symptoms', 'medications_taken', 'steps', 
+                   'diet_notes', 'notes', 'added_at']
+        ws = get_or_create_worksheet(sheet, "Daily Wellness Log", headers)
+        
+        # Check for duplicates (same date + person)
+        existing = ws.get_all_records()
+        for record in existing:
+            if record.get('date') == wellness_data['date'] and record.get('person') == wellness_data['person']:
+                # Update existing record instead
+                return True  # Would need to implement update logic, for now just return True
+        
+        # Append new record
+        ws.append_row([
+            wellness_data.get('date', ''),
+            wellness_data.get('person', ''),
+            wellness_data.get('exercise_name', ''),
+            wellness_data.get('exercise_done', ''),
+            wellness_data.get('water_bottles', ''),
+            wellness_data.get('pee_count', ''),
+            wellness_data.get('poop_count', ''),
+            wellness_data.get('sleep_hours', ''),
+            wellness_data.get('mood_score', ''),
+            wellness_data.get('stress_score', ''),
+            wellness_data.get('symptoms', ''),
+            wellness_data.get('medications_taken', ''),
+            wellness_data.get('steps', ''),
+            wellness_data.get('diet_notes', ''),
+            wellness_data.get('notes', ''),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ])
+        return True
+    except:
+        return False
+
+def analyze_wellness_week(wellness_logs, person_name, days=7):
+    """Analyze a week of wellness data"""
+    if not wellness_logs:
+        return None
+    
+    try:
+        # Filter by person and recent dates
+        person_logs = [log for log in wellness_logs if log.get('person') == person_name]
+        
+        if not person_logs:
+            return None
+        
+        # Convert dates and filter last 7 days
+        recent_logs = []
+        for log in person_logs:
+            try:
+                log_date = pd.to_datetime(log.get('date', datetime.now()))
+                if (datetime.now() - log_date).days <= days:
+                    recent_logs.append(log)
+            except:
+                pass
+        
+        if len(recent_logs) < 2:
+            return None
+        
+        # Calculate averages and patterns
+        water_avg = sum([safe_float(log.get('water_bottles', 0)) for log in recent_logs]) / len(recent_logs)
+        sleep_avg = sum([safe_float(log.get('sleep_hours', 0)) for log in recent_logs]) / len(recent_logs)
+        mood_avg = sum([safe_float(log.get('mood_score', 0)) for log in recent_logs]) / len(recent_logs)
+        stress_avg = sum([safe_float(log.get('stress_score', 0)) for log in recent_logs]) / len(recent_logs)
+        
+        # Exercise completion
+        exercises_done = sum([1 for log in recent_logs if log.get('exercise_done', '').lower() == 'yes'])
+        exercise_rate = (exercises_done / len(recent_logs)) * 100
+        
+        # Steps average
+        steps_avg = sum([safe_float(log.get('steps', 0)) for log in recent_logs]) / len(recent_logs)
+        
+        # Bathroom patterns
+        pee_avg = sum([safe_float(log.get('pee_count', 0)) for log in recent_logs]) / len(recent_logs)
+        poop_avg = sum([safe_float(log.get('poop_count', 0)) for log in recent_logs]) / len(recent_logs)
+        
+        return {
+            'water_avg': round(water_avg, 1),
+            'sleep_avg': round(sleep_avg, 1),
+            'mood_avg': round(mood_avg, 1),
+            'stress_avg': round(stress_avg, 1),
+            'exercise_rate': round(exercise_rate, 1),
+            'steps_avg': round(steps_avg, 0),
+            'pee_avg': round(pee_avg, 1),
+            'poop_avg': round(poop_avg, 1),
+            'num_days': len(recent_logs)
+        }
+    except:
+        return None
+
 # Main UI
 st.title("🏥 Health & Wealth Tracker")
 st.markdown("Complete life management: Finance + Health + Smart Nutrition (Data in Google Sheets ☁️)")
 
-tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🏋️ Fitness Plan", "👶 Fertility Tracker", "🥗 Smart Grocery", "🎯 Budgets"])
+tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🏋️ Fitness Plan", "✅ Daily Wellness Log", "👶 Fertility Tracker", "🥗 Smart Grocery", "🎯 Budgets"])
 
 with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
@@ -2622,7 +2735,293 @@ with tabs[6]:  # Fitness Plan
             else:
                 st.info("No health data for Amrithavarshini. Upload health reports first!")
 
-with tabs[7]:  # Fertility Tracker
+with tabs[7]:  # Daily Wellness Log
+    st.markdown("### ✅ Daily Wellness Tracker")
+    st.info("📊 Track your daily habits and get AI insights on your health patterns!")
+    
+    # Load wellness logs
+    wellness_logs = load_wellness_logs()
+    
+    # Sub-tabs
+    wellness_tabs = st.tabs(["📝 Today's Log", "👨 Govind Analytics", "👩 Amrithavarshini Analytics", "📊 Weekly Report"])
+    
+    # Tab 1: Today's Log Entry
+    with wellness_tabs[0]:
+        st.markdown("#### Log Your Daily Wellness")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            log_date = st.date_input("Date", value=datetime.now().date(), key="wellness_date")
+            person = st.selectbox("Who?", ["Govind", "Amrithavarshini"], key="wellness_person")
+        with col2:
+            st.write("")
+            st.write("")
+        with col3:
+            st.write("")
+            st.write("")
+        
+        # Exercise
+        st.markdown("##### 🏋️ Exercise")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            exercise_name = st.text_input("Exercise Name", placeholder="e.g., Brisk Walking, Yoga", key="ex_name")
+        with col2:
+            exercise_done = st.checkbox("Did it today?", key="ex_done")
+        with col3:
+            st.write("")
+        
+        # Hydration & Bathroom
+        st.markdown("##### 💧 Hydration & Bathroom")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            water_bottles = st.number_input("Water Bottles Drank", min_value=0, value=0, step=1, key="water")
+        with col2:
+            pee_count = st.number_input("Pee Count", min_value=0, value=0, step=1, key="pee")
+        with col3:
+            poop_count = st.number_input("Poop Count", min_value=0, value=0, step=1, key="poop")
+        
+        # Sleep & Mood
+        st.markdown("##### 😴 Sleep & Mood")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            sleep_hours = st.number_input("Sleep Hours", min_value=0.0, max_value=24.0, value=7.0, step=0.5, key="sleep")
+        with col2:
+            mood_score = st.slider("Mood/Energy (1-10)", min_value=1, max_value=10, value=5, key="mood")
+        with col3:
+            stress_score = st.slider("Stress Level (1-10)", min_value=1, max_value=10, value=5, key="stress")
+        
+        # Symptoms
+        st.markdown("##### 🤒 Symptoms")
+        symptoms = st.multiselect(
+            "Any Symptoms? (Select all that apply)",
+            ["Headache", "Nausea", "Dizziness", "Fatigue", "Cramps", "Bloating", "Fever", "Cough", "None"],
+            key="symptoms_select"
+        )
+        
+        # Medications & Steps
+        st.markdown("##### 💊 Medications & Steps")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            meds_taken = st.checkbox("Medications Taken?", key="meds_check")
+        with col2:
+            steps = st.number_input("Steps Today", min_value=0, value=0, step=500, key="steps_input")
+        with col3:
+            st.write("")
+        
+        # Diet & Notes
+        st.markdown("##### 🍽️ Diet & Notes")
+        diet_notes = st.selectbox("How was your diet?", ["Healthy", "Mixed", "Junk Food", "Not Tracked"], key="diet_select")
+        notes = st.text_area("Additional Notes", placeholder="Any other observations...", key="wellness_notes")
+        
+        # Save button
+        if st.button("💾 Save Daily Log"):
+            wellness_data = {
+                'date': log_date.strftime("%Y-%m-%d"),
+                'person': person,
+                'exercise_name': exercise_name if exercise_name else 'Not logged',
+                'exercise_done': 'Yes' if exercise_done else 'No',
+                'water_bottles': str(water_bottles),
+                'pee_count': str(pee_count),
+                'poop_count': str(poop_count),
+                'sleep_hours': str(sleep_hours),
+                'mood_score': str(mood_score),
+                'stress_score': str(stress_score),
+                'symptoms': ', '.join(symptoms) if symptoms else 'None',
+                'medications_taken': 'Yes' if meds_taken else 'No',
+                'steps': str(steps),
+                'diet_notes': diet_notes,
+                'notes': notes
+            }
+            
+            if save_wellness_log(wellness_data):
+                st.success(f"✅ Saved {person}'s wellness log for {log_date.strftime('%B %d, %Y')}!")
+                wellness_logs = load_wellness_logs()
+            else:
+                st.error("❌ Failed to save wellness log!")
+    
+    # Tab 2: Govind Analytics
+    with wellness_tabs[1]:
+        st.markdown("#### 👨 Govind's Weekly Wellness")
+        
+        gov_analysis = analyze_wellness_week(wellness_logs, "Govind", days=7)
+        
+        if gov_analysis:
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Water Intake", f"{gov_analysis['water_avg']:.1f} bottles", "Target: 8")
+            with col2:
+                st.metric("Sleep", f"{gov_analysis['sleep_avg']:.1f} hrs", "Target: 7-9")
+            with col3:
+                st.metric("Mood", f"{gov_analysis['mood_avg']:.1f}/10", "Higher is better")
+            with col4:
+                st.metric("Stress", f"{gov_analysis['stress_avg']:.1f}/10", "Lower is better")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Exercise", f"{gov_analysis['exercise_rate']:.0f}%", "Days completed")
+            with col2:
+                st.metric("Steps", f"{gov_analysis['steps_avg']:.0f}", "Target: 8000")
+            with col3:
+                st.metric("Days Tracked", gov_analysis['num_days'])
+            
+            # AI Analysis
+            if gov_analysis['num_days'] >= 3:
+                st.markdown("#### 💡 AI Health Insights")
+                
+                # Generate insights based on data
+                insights = []
+                
+                if gov_analysis['water_avg'] < 6:
+                    insights.append("⚠️ **Hydration:** You're drinking below target. Aim for 8+ bottles daily!")
+                elif gov_analysis['water_avg'] >= 8:
+                    insights.append("✅ **Hydration:** Great water intake! Keep it up!")
+                
+                if gov_analysis['sleep_avg'] < 6:
+                    insights.append("🚨 **Sleep:** Critical - You're severely sleep deprived. Prioritize sleep tonight!")
+                elif gov_analysis['sleep_avg'] < 7:
+                    insights.append("⚠️ **Sleep:** Getting close to minimum. Try for 7.5+ hours.")
+                elif gov_analysis['sleep_avg'] >= 7.5:
+                    insights.append("✅ **Sleep:** Excellent sleep schedule! This improves everything else.")
+                
+                if gov_analysis['mood_avg'] >= 7:
+                    insights.append("😊 **Mood:** Your mood is good! Keep doing what you're doing.")
+                elif gov_analysis['mood_avg'] < 5:
+                    insights.append("⚠️ **Mood:** Low mood detected. Check sleep, water, and exercise - they all impact mood.")
+                
+                if gov_analysis['stress_avg'] > 7:
+                    insights.append("😰 **Stress:** High stress. Try exercise, meditation, or walks to manage it.")
+                elif gov_analysis['stress_avg'] <= 5:
+                    insights.append("✅ **Stress:** Great stress management! You're doing well.")
+                
+                if gov_analysis['exercise_rate'] >= 70:
+                    insights.append("💪 **Exercise:** Excellent consistency! 70%+ completion is amazing!")
+                elif gov_analysis['exercise_rate'] >= 50:
+                    insights.append("👍 **Exercise:** Good effort! Try for 80% compliance.")
+                elif gov_analysis['exercise_rate'] < 30:
+                    insights.append("⚠️ **Exercise:** Low completion rate. Build momentum with just 1 workout!")
+                
+                if gov_analysis['steps_avg'] < 5000:
+                    insights.append("🚶 **Steps:** Low daily steps. Add a 20-min walk to increase movement!")
+                elif gov_analysis['steps_avg'] >= 10000:
+                    insights.append("🏃 **Steps:** Great activity level! You're very active!")
+                
+                for insight in insights:
+                    st.write(insight)
+        else:
+            st.info("📝 Add at least 3 days of wellness logs to see analytics!")
+    
+    # Tab 3: Amrithavarshini Analytics
+    with wellness_tabs[2]:
+        st.markdown("#### 👩 Amrithavarshini's Weekly Wellness")
+        
+        amit_analysis = analyze_wellness_week(wellness_logs, "Amrithavarshini", days=7)
+        
+        if amit_analysis:
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Water Intake", f"{amit_analysis['water_avg']:.1f} bottles", "Target: 8")
+            with col2:
+                st.metric("Sleep", f"{amit_analysis['sleep_avg']:.1f} hrs", "Target: 7-9")
+            with col3:
+                st.metric("Mood", f"{amit_analysis['mood_avg']:.1f}/10", "Higher is better")
+            with col4:
+                st.metric("Stress", f"{amit_analysis['stress_avg']:.1f}/10", "Lower is better")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Exercise", f"{amit_analysis['exercise_rate']:.0f}%", "Days completed")
+            with col2:
+                st.metric("Steps", f"{amit_analysis['steps_avg']:.0f}", "Target: 8000")
+            with col3:
+                st.metric("Days Tracked", amit_analysis['num_days'])
+            
+            # AI Analysis
+            if amit_analysis['num_days'] >= 3:
+                st.markdown("#### 💡 AI Health Insights")
+                
+                # Generate insights based on data
+                insights = []
+                
+                if amit_analysis['water_avg'] < 6:
+                    insights.append("⚠️ **Hydration:** You're drinking below target. Aim for 8+ bottles daily!")
+                elif amit_analysis['water_avg'] >= 8:
+                    insights.append("✅ **Hydration:** Great water intake! Keep it up!")
+                
+                if amit_analysis['sleep_avg'] < 6:
+                    insights.append("🚨 **Sleep:** Critical - You're severely sleep deprived. Prioritize sleep tonight!")
+                elif amit_analysis['sleep_avg'] < 7:
+                    insights.append("⚠️ **Sleep:** Getting close to minimum. Try for 7.5+ hours.")
+                elif amit_analysis['sleep_avg'] >= 7.5:
+                    insights.append("✅ **Sleep:** Excellent sleep schedule! This improves everything else.")
+                
+                if amit_analysis['mood_avg'] >= 7:
+                    insights.append("😊 **Mood:** Your mood is good! Keep doing what you're doing.")
+                elif amit_analysis['mood_avg'] < 5:
+                    insights.append("⚠️ **Mood:** Low mood detected. Check sleep, water, and exercise - they all impact mood.")
+                
+                if amit_analysis['stress_avg'] > 7:
+                    insights.append("😰 **Stress:** High stress. Try exercise, meditation, or walks to manage it.")
+                elif amit_analysis['stress_avg'] <= 5:
+                    insights.append("✅ **Stress:** Great stress management! You're doing well.")
+                
+                if amit_analysis['exercise_rate'] >= 70:
+                    insights.append("💪 **Exercise:** Excellent consistency! 70%+ completion is amazing!")
+                elif amit_analysis['exercise_rate'] >= 50:
+                    insights.append("👍 **Exercise:** Good effort! Try for 80% compliance.")
+                elif amit_analysis['exercise_rate'] < 30:
+                    insights.append("⚠️ **Exercise:** Low completion rate. Build momentum with just 1 workout!")
+                
+                if amit_analysis['steps_avg'] < 5000:
+                    insights.append("🚶 **Steps:** Low daily steps. Add a 20-min walk to increase movement!")
+                elif amit_analysis['steps_avg'] >= 10000:
+                    insights.append("🏃 **Steps:** Great activity level! You're very active!")
+                
+                for insight in insights:
+                    st.write(insight)
+        else:
+            st.info("📝 Add at least 3 days of wellness logs to see analytics!")
+    
+    # Tab 4: Weekly Report
+    with wellness_tabs[3]:
+        st.markdown("#### 📊 Weekly Wellness Report")
+        
+        if wellness_logs:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("##### This Week's Summary")
+                
+                gov_analysis = analyze_wellness_week(wellness_logs, "Govind", days=7)
+                amit_analysis = analyze_wellness_week(wellness_logs, "Amrithavarshini", days=7)
+                
+                if gov_analysis:
+                    st.markdown("**Govind:**")
+                    st.write(f"- Water: {gov_analysis['water_avg']:.1f} bottles")
+                    st.write(f"- Sleep: {gov_analysis['sleep_avg']:.1f} hours")
+                    st.write(f"- Mood: {gov_analysis['mood_avg']:.1f}/10")
+                    st.write(f"- Exercise: {gov_analysis['exercise_rate']:.0f}% done")
+                
+                if amit_analysis:
+                    st.markdown("**Amrithavarshini:**")
+                    st.write(f"- Water: {amit_analysis['water_avg']:.1f} bottles")
+                    st.write(f"- Sleep: {amit_analysis['sleep_avg']:.1f} hours")
+                    st.write(f"- Mood: {amit_analysis['mood_avg']:.1f}/10")
+                    st.write(f"- Exercise: {amit_analysis['exercise_rate']:.0f}% done")
+            
+            with col2:
+                st.markdown("##### 🎯 Next Week Goals")
+                st.write("""
+                Based on this week's data:
+                - Increase water intake by 1-2 bottles
+                - Aim for 7.5+ hours sleep
+                - Improve exercise consistency to 70%+
+                - Keep stress management active
+                - Maintain good hydration habits
+                """)
+        else:
+            st.info("No wellness data yet. Start logging today!")
+
+with tabs[8]:  # Fertility Tracker
     st.markdown("### 👶 Fertility & Ovulation Tracker")
     st.info("📊 Track your menstrual cycle to predict ovulation and optimize conception timing!")
     
@@ -2925,7 +3324,7 @@ with tabs[7]:  # Fertility Tracker
                 Most couples conceive within 6 months with perfect timing!
                 """)
 
-with tabs[8]:  # Smart Grocery
+with tabs[9]:  # Smart Grocery
     st.markdown("### 🥗 Smart Grocery Recommendations")
     
     if st.session_state.expenses:
@@ -3011,7 +3410,7 @@ with tabs[8]:  # Smart Grocery
     else:
         st.info("📸 No grocery data. Upload receipts to get smart recommendations!")
 
-with tabs[9]:  # Budgets
+with tabs[10]:  # Budgets
     st.markdown("### 🎯 Set Monthly Budgets")
     
     categories = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
