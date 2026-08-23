@@ -1301,11 +1301,116 @@ if 'budgets' not in st.session_state:
 if 'extracted_metrics' not in st.session_state:
     st.session_state.extracted_metrics = None
 
+# Fertility Tracking Functions
+def load_fertility_cycles():
+    """Load menstrual cycle data from Google Sheets"""
+    try:
+        sheet = get_gsheet_client()
+        if not sheet:
+            return []
+        headers = ['date_start', 'date_end', 'cycle_length', 'cervical_fluid', 'temperature', 'symptoms', 'notes', 'added_at']
+        ws = get_or_create_worksheet(sheet, "Fertility Cycles", headers)
+        return ws.get_all_records()
+    except:
+        return []
+
+def save_cycle_to_gsheet(cycle_data):
+    """Save a menstrual cycle to Google Sheets"""
+    try:
+        sheet = get_gsheet_client()
+        if not sheet:
+            return False
+        
+        headers = ['date_start', 'date_end', 'cycle_length', 'cervical_fluid', 'temperature', 'symptoms', 'notes', 'added_at']
+        ws = get_or_create_worksheet(sheet, "Fertility Cycles", headers)
+        
+        # Check for duplicates
+        existing = ws.get_all_records()
+        for record in existing:
+            if record.get('date_start') == cycle_data['date_start']:
+                return False  # Duplicate found
+        
+        # Append new record
+        ws.append_row([
+            cycle_data.get('date_start', ''),
+            cycle_data.get('date_end', ''),
+            cycle_data.get('cycle_length', ''),
+            cycle_data.get('cervical_fluid', ''),
+            cycle_data.get('temperature', ''),
+            cycle_data.get('symptoms', ''),
+            cycle_data.get('notes', ''),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ])
+        return True
+    except:
+        return False
+
+def calculate_ovulation_date(period_start_date, cycle_length=28):
+    """Calculate ovulation date (cycle_length - 14 days)"""
+    from datetime import timedelta
+    period_date = pd.to_datetime(period_start_date)
+    ovulation_date = period_date + timedelta(days=cycle_length - 14)
+    return ovulation_date
+
+def calculate_fertile_window(ovulation_date):
+    """Calculate 6-day fertile window (5 days before + 1 day after)"""
+    from datetime import timedelta
+    fertile_start = ovulation_date - timedelta(days=5)
+    fertile_end = ovulation_date + timedelta(days=1)
+    return fertile_start, fertile_end
+
+def analyze_cycle_patterns(cycles):
+    """Analyze menstrual cycle patterns"""
+    if not cycles or len(cycles) < 2:
+        return None
+    
+    try:
+        cycle_lengths = []
+        for cycle in cycles:
+            if cycle.get('cycle_length'):
+                cycle_lengths.append(int(cycle['cycle_length']))
+        
+        if not cycle_lengths:
+            return None
+        
+        avg_length = sum(cycle_lengths) / len(cycle_lengths)
+        min_length = min(cycle_lengths)
+        max_length = max(cycle_lengths)
+        
+        # Check if regular (±2 days variation)
+        is_regular = (max_length - min_length) <= 2
+        
+        return {
+            'average_cycle_length': round(avg_length, 1),
+            'min_cycle_length': min_length,
+            'max_cycle_length': max_length,
+            'num_cycles': len(cycle_lengths),
+            'is_regular': is_regular,
+            'cycle_lengths': cycle_lengths
+        }
+    except:
+        return None
+
+def get_conception_probability(cycle_analysis):
+    """Calculate conception probability based on cycle data"""
+    if not cycle_analysis:
+        return None
+    
+    # Base probability: 20-25% per cycle for healthy couple
+    base_prob = 0.22
+    
+    # Bonus for regular cycles
+    if cycle_analysis.get('is_regular'):
+        base_prob += 0.05
+    
+    # Convert to percentage
+    return round(base_prob * 100, 1)
+
 # Main UI
 st.title("🏥 Health & Wealth Tracker")
 st.markdown("Complete life management: Finance + Health + Smart Nutrition (Data in Google Sheets ☁️)")
 
-tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🏋️ Fitness Plan", "🥗 Smart Grocery", "🎯 Budgets"])
+tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🏋️ Fitness Plan", "👶 Fertility Tracker", "🥗 Smart Grocery", "🎯 Budgets"])
 
 with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
@@ -2496,7 +2601,310 @@ with tabs[6]:  # Fitness Plan
             else:
                 st.info("No health data for Amrithavarshini. Upload health reports first!")
 
-with tabs[7]:  # Smart Grocery
+with tabs[7]:  # Fertility Tracker
+    st.markdown("### 👶 Fertility & Ovulation Tracker")
+    st.info("📊 Track your menstrual cycle to predict ovulation and optimize conception timing!")
+    
+    # Only show for Amrithavarshini
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.markdown("#### Amrithavarshini's Fertility Tracking")
+    
+    # Load fertility cycles
+    fertility_cycles = load_fertility_cycles()
+    
+    # Tabs within fertility tracker
+    fert_tabs = st.tabs(["📅 Add/View Cycles", "📊 Cycle Analysis", "🎯 Ovulation Prediction", "👶 Conception Tips"])
+    
+    # Tab 1: Add/View Cycles
+    with fert_tabs[0]:
+        st.markdown("#### Add New Menstrual Cycle")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            period_start = st.date_input("Period Start Date", value=None, key="period_start")
+        with col2:
+            period_end = st.date_input("Period End Date", value=None, key="period_end")
+        with col3:
+            cervical_fluid = st.selectbox("Cervical Fluid (Peak Day)", ["Dry", "Sticky", "Creamy", "Watery"], key="cervical_fluid")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            temperature = st.number_input("Basal Temperature (°C) - Optional", min_value=36.0, max_value=38.0, value=36.5, step=0.1, key="temp_input")
+        with col2:
+            temperature = None if temperature == 36.5 else temperature
+        
+        symptoms = st.multiselect(
+            "Symptoms (Select all that apply)",
+            ["Cramping", "Bloating", "Breast Tenderness", "Energy Increase", "Libido Increase", "Mood Changes"],
+            key="symptoms_select"
+        )
+        
+        notes = st.text_area("Additional Notes", placeholder="Any other observations...", key="notes_input")
+        
+        if st.button("💾 Save Cycle Data"):
+            if period_start and period_end:
+                if period_end >= period_start:
+                    cycle_length = (period_end - period_start).days + 1
+                    
+                    cycle_data = {
+                        'date_start': period_start.strftime("%Y-%m-%d"),
+                        'date_end': period_end.strftime("%Y-%m-%d"),
+                        'cycle_length': str(cycle_length),
+                        'cervical_fluid': cervical_fluid,
+                        'temperature': str(temperature) if temperature else '',
+                        'symptoms': ', '.join(symptoms) if symptoms else '',
+                        'notes': notes
+                    }
+                    
+                    if save_cycle_to_gsheet(cycle_data):
+                        st.success("✅ Cycle saved successfully!")
+                        fertility_cycles = load_fertility_cycles()
+                    else:
+                        st.warning("⚠️ This cycle start date already exists!")
+                else:
+                    st.error("❌ End date must be after start date!")
+            else:
+                st.error("❌ Please enter both start and end dates!")
+        
+        # Display past cycles
+        if fertility_cycles:
+            st.markdown("#### Past Cycles")
+            for idx, cycle in enumerate(reversed(fertility_cycles), 1):
+                with st.expander(f"Cycle {idx}: {cycle.get('date_start', 'N/A')} to {cycle.get('date_end', 'N/A')} ({cycle.get('cycle_length', '?')} days)"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Cervical Fluid:** {cycle.get('cervical_fluid', 'N/A')}")
+                        st.write(f"**Temperature:** {cycle.get('temperature', 'Not tracked')}")
+                    with col2:
+                        st.write(f"**Symptoms:** {cycle.get('symptoms', 'None logged')}")
+                        st.write(f"**Notes:** {cycle.get('notes', 'No notes')}")
+    
+    # Tab 2: Cycle Analysis
+    with fert_tabs[1]:
+        if fertility_cycles and len(fertility_cycles) >= 2:
+            cycle_analysis = analyze_cycle_patterns(fertility_cycles)
+            
+            if cycle_analysis:
+                st.markdown("#### 📊 Your Cycle Patterns")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Average Cycle", f"{cycle_analysis['average_cycle_length']:.0f} days", 
+                              f"({cycle_analysis['min_cycle_length']}-{cycle_analysis['max_cycle_length']} days)")
+                with col2:
+                    status = "✅ Regular" if cycle_analysis['is_regular'] else "⚠️ Irregular"
+                    st.metric("Status", status)
+                with col3:
+                    st.metric("Cycles Tracked", cycle_analysis['num_cycles'])
+                with col4:
+                    prob = get_conception_probability(cycle_analysis)
+                    st.metric("Conception Odds", f"{prob}%/month")
+                
+                # Cycle length trend
+                st.markdown("#### Cycle Length Trend")
+                cycle_df = pd.DataFrame({
+                    'Cycle': range(1, len(cycle_analysis['cycle_lengths']) + 1),
+                    'Length (days)': cycle_analysis['cycle_lengths']
+                })
+                
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=cycle_df['Cycle'],
+                    y=cycle_df['Length (days)'],
+                    mode='lines+markers',
+                    name='Cycle Length',
+                    line=dict(color='#FF69B4', width=3),
+                    marker=dict(size=10)
+                ))
+                fig.add_hline(y=cycle_analysis['average_cycle_length'], line_dash="dash", 
+                             line_color="green", annotation_text="Average", annotation_position="right")
+                fig.update_layout(title="Menstrual Cycle Lengths Over Time", 
+                                 xaxis_title="Cycle Number", yaxis_title="Days",
+                                 hovermode='x unified')
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Regularity assessment
+                if cycle_analysis['is_regular']:
+                    st.success("✅ Your cycles are VERY REGULAR! This is ideal for conception planning. You can predict ovulation with high accuracy!")
+                else:
+                    st.warning("⚠️ Your cycles vary by more than 2 days. Track more cycles to get better predictions. Still trackable, just less predictable.")
+        else:
+            st.info("📝 Add at least 2 cycle records to see analysis. Currently you have " + 
+                   f"{len(fertility_cycles)} cycles recorded.")
+    
+    # Tab 3: Ovulation Prediction
+    with fert_tabs[2]:
+        if fertility_cycles:
+            cycle_analysis = analyze_cycle_patterns(fertility_cycles)
+            if cycle_analysis:
+                avg_cycle = cycle_analysis['average_cycle_length']
+            else:
+                avg_cycle = 28
+        else:
+            avg_cycle = 28
+        
+        st.markdown("#### 🎯 Ovulation & Fertile Window Prediction")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            last_period = st.date_input("Last Period Start Date", value=None, key="last_period_pred")
+        with col2:
+            cycle_length = st.slider("Your Cycle Length (days)", min_value=21, max_value=45, 
+                                    value=int(avg_cycle), key="cycle_length_slider")
+        
+        if last_period:
+            ovulation_date = calculate_ovulation_date(last_period, cycle_length)
+            fertile_start, fertile_end = calculate_fertile_window(ovulation_date)
+            
+            st.markdown(f"#### 📅 Your Prediction ({last_period.strftime('%B %Y')})")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Last Period", last_period.strftime("%b %d"))
+            with col2:
+                st.metric("Expected Ovulation", ovulation_date.strftime("%b %d"))
+            with col3:
+                next_period = last_period + pd.Timedelta(days=cycle_length)
+                st.metric("Next Period", next_period.strftime("%b %d"))
+            
+            # Fertile window details
+            st.markdown("#### 🌟 Fertile Window (Best Days to Conceive)")
+            
+            st.info(f"**Fertile Period:** {fertile_start.strftime('%b %d')} to {fertile_end.strftime('%b %d')} (6 days)")
+            
+            # Create fertility calendar
+            days_data = []
+            current = last_period
+            for i in range(cycle_length):
+                day_type = "period" if i < 5 else "normal"
+                
+                if current >= fertile_start and current <= fertile_end:
+                    if current == ovulation_date:
+                        day_type = "ovulation"
+                    else:
+                        day_type = "fertile"
+                
+                days_data.append({
+                    'date': current,
+                    'day': current.strftime("%a"),
+                    'type': day_type,
+                    'day_num': (current - last_period).days
+                })
+                current += pd.Timedelta(days=1)
+            
+            # Display calendar
+            st.markdown("#### 📅 Fertility Calendar")
+            cols = st.columns(7)
+            col_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            
+            for i, col_name in enumerate(col_names):
+                with cols[i]:
+                    st.write(f"**{col_name}**")
+            
+            current_col = (last_period.weekday())  # 0=Monday
+            
+            for day_info in days_data:
+                if current_col == 0:
+                    cols = st.columns(7)
+                
+                with cols[current_col]:
+                    if day_info['type'] == 'period':
+                        st.markdown(f"🔴 {day_info['day']}\n{day_info['date'].strftime('%d')}")
+                    elif day_info['type'] == 'ovulation':
+                        st.markdown(f"⭐ {day_info['day']}\n{day_info['date'].strftime('%d')}")
+                    elif day_info['type'] == 'fertile':
+                        st.markdown(f"🟢 {day_info['day']}\n{day_info['date'].strftime('%d')}")
+                    else:
+                        st.markdown(f"⚪ {day_info['day']}\n{day_info['date'].strftime('%d')}")
+                
+                current_col = (current_col + 1) % 7
+            
+            # Best conception days
+            st.markdown("#### ✅ Best Conception Days")
+            best_day_1 = (ovulation_date - pd.Timedelta(days=1)).strftime("%A, %b %d")
+            best_day_2 = ovulation_date.strftime("%A, %b %d")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.success(f"**Day -1:** {best_day_1}\n25-30% conception rate")
+            with col2:
+                st.success(f"**Day 0 (Peak):** {best_day_2}\n30-35% conception rate")
+            
+            st.info("💡 **Tip:** Have intercourse on both days for best results. Daily intercourse during fertile window is also effective!")
+        else:
+            st.info("📅 Enter your last period date to see predictions")
+    
+    # Tab 4: Conception Tips
+    with fert_tabs[3]:
+        st.markdown("#### 👶 Tips to Optimize Conception")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("##### 🛏️ Timing & Intimacy")
+            st.write("""
+            - Have intercourse every other day during fertile window
+            - Don't stress about frequency (every 2-3 days works well)
+            - Positions: Traditional positions optimal for sperm delivery
+            - Relax after intercourse (gravity helps!)
+            """)
+            
+            st.markdown("##### 🩺 Tracking Methods")
+            st.write("""
+            - **Cervical Fluid:** Peak fertility when watery/egg-white consistency
+            - **Basal Temperature:** Slight rise (0.3-0.5°C) confirms ovulation
+            - **Ovulation Strips:** Detect LH surge 24-48h before ovulation
+            - **Apps:** Track data for pattern recognition
+            """)
+        
+        with col2:
+            st.markdown("##### 🥗 Nutrition for Fertility")
+            st.write("""
+            - **Folic Acid:** Leafy greens, legumes, asparagus
+            - **Iron:** Red meat, spinach, lentils
+            - **Zinc:** Oysters, nuts, seeds, pumpkin seeds
+            - **Vitamin D:** Sunlight, fatty fish, fortified milk
+            - **Antioxidants:** Berries, dark chocolate, nuts
+            """)
+            
+            st.markdown("##### 😴 Lifestyle Factors")
+            st.write("""
+            - **Sleep:** 7-9 hours improves fertility
+            - **Stress:** Chronic stress reduces conception odds
+            - **Exercise:** Moderate (30 min/day) ideal - avoid extremes
+            - **Weight:** Healthy BMI improves ovulation
+            - **Avoid:** Smoking, excess caffeine, alcohol
+            """)
+        
+        st.markdown("---")
+        st.markdown("#### 💪 Partner Support")
+        st.write("""
+        **For Govind:** Support with healthy lifestyle to maximize sperm quality:
+        - Sleep 7+ hours (improves sperm count and motility)
+        - Avoid hot baths/saunas (heat damages sperm production)
+        - Take zinc supplement (improves sperm quality)
+        - Regular exercise (improves testosterone)
+        - Reduce stress and caffeine
+        - Maintain healthy weight
+        """)
+        
+        if fertility_cycles:
+            cycle_analysis = analyze_cycle_patterns(fertility_cycles)
+            if cycle_analysis:
+                prob = get_conception_probability(cycle_analysis)
+                st.success(f"""
+                ✅ **Your Conception Probability:** {prob}% per cycle
+                
+                **Timeline Expectations:**
+                - 1 month: {prob}% chance
+                - 3 months: ~{min(95, round(prob * 3.5))}% cumulative chance
+                - 6 months: ~{min(99, round(prob * 6.5))}% cumulative chance
+                
+                Most couples conceive within 6 months with perfect timing!
+                """)
+
+with tabs[8]:  # Smart Grocery
     st.markdown("### 🥗 Smart Grocery Recommendations")
     
     if st.session_state.expenses:
@@ -2582,7 +2990,7 @@ with tabs[7]:  # Smart Grocery
     else:
         st.info("📸 No grocery data. Upload receipts to get smart recommendations!")
 
-with tabs[8]:  # Budgets
+with tabs[9]:  # Budgets
     st.markdown("### 🎯 Set Monthly Budgets")
     
     categories = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
