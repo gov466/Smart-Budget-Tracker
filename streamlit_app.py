@@ -2041,6 +2041,94 @@ with tabs[3]:  # Shopping Analytics
 with tabs[4]:  # Wealth Dashboard
     st.markdown("### 📊 Complete Financial Dashboard")
     
+    # TFSA & RRSP Cumulative Savings Section
+    st.markdown("#### 💰 Retirement Savings Tracker (TFSA + RRSP)")
+    
+    # Get monthly TFSA and RRSP amounts from settings
+    tfsa_monthly = safe_float(st.session_state.settings.get('fixed_tfsa', 0))
+    rrsp_monthly = safe_float(st.session_state.settings.get('fixed_rrsp', 0))
+    total_monthly_savings = tfsa_monthly + rrsp_monthly
+    
+    # Calculate months of contributions
+    today = datetime.now()
+    # Count months from earliest expense or 1 year default
+    months_contributing = 12  # Default to 1 year
+    
+    if st.session_state.expenses:
+        dates = []
+        for exp in st.session_state.expenses:
+            try:
+                exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
+                dates.append(exp_date)
+            except:
+                pass
+        if dates:
+            earliest_date = min(dates)
+            months_contributing = max(1, (today - earliest_date).days // 30)
+    
+    # Calculate cumulative savings
+    tfsa_cumulative = tfsa_monthly * months_contributing
+    rrsp_cumulative = rrsp_monthly * months_contributing
+    total_cumulative = tfsa_cumulative + rrsp_cumulative
+    
+    # Display metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("💵 TFSA Monthly", f"${tfsa_monthly:.2f}")
+    with col2:
+        st.metric("💵 RRSP Monthly", f"${rrsp_monthly:.2f}")
+    with col3:
+        st.metric("📈 Months Contributing", f"{months_contributing}")
+    with col4:
+        st.metric("💰 Total Monthly Savings", f"${total_monthly_savings:.2f}")
+    
+    # Show cumulative totals
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("🏦 TFSA Cumulative", f"${tfsa_cumulative:,.2f}", f"Since {(today - pd.Timedelta(days=30*months_contributing)).strftime('%b %Y')}")
+    with col2:
+        st.metric("📊 RRSP Cumulative", f"${rrsp_cumulative:,.2f}", f"Since {(today - pd.Timedelta(days=30*months_contributing)).strftime('%b %Y')}")
+    with col3:
+        st.metric("🎯 Total Retirement Savings", f"${total_cumulative:,.2f}", f"+${total_monthly_savings:.2f}/month")
+    
+    # Projection for next 5 years
+    st.markdown("#### 📈 5-Year Savings Projection")
+    
+    years = [1, 2, 3, 4, 5]
+    tfsa_projections = [tfsa_cumulative + (tfsa_monthly * 12 * year) for year in years]
+    rrsp_projections = [rrsp_cumulative + (rrsp_monthly * 12 * year) for year in years]
+    total_projections = [tfsa_projections[i] + rrsp_projections[i] for i in range(5)]
+    
+    # Create projection chart
+    projection_df = pd.DataFrame({
+        'Year': [f"Year {y}" for y in years],
+        'TFSA': tfsa_projections,
+        'RRSP': rrsp_projections,
+        'Total': total_projections
+    })
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(name='TFSA', x=projection_df['Year'], y=projection_df['TFSA'], marker_color='#1f77b4'))
+    fig.add_trace(go.Bar(name='RRSP', x=projection_df['Year'], y=projection_df['RRSP'], marker_color='#ff7f0e'))
+    fig.update_layout(
+        title="Retirement Savings Projection (Next 5 Years)",
+        xaxis_title="Years",
+        yaxis_title="Amount (CAD)",
+        barmode='stack',
+        hovermode='x unified',
+        height=400
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Breakdown table
+    st.markdown("#### 📋 Projection Breakdown")
+    st.dataframe(
+        projection_df.style.format({'TFSA': '${:,.0f}', 'RRSP': '${:,.0f}', 'Total': '${:,.0f}'}),
+        use_container_width=True
+    )
+    
+    st.markdown("---")
+    
     # Month selector
     st.markdown("#### 📅 Select Month to View")
     col1, col2 = st.columns([2, 3])
@@ -3174,6 +3262,9 @@ with tabs[8]:  # Fertility Tracker
                                     value=int(avg_cycle), key="cycle_length_slider")
         
         if last_period:
+            # Convert to pandas Timestamp for consistent date handling
+            last_period = pd.Timestamp(last_period)
+            
             ovulation_date = calculate_ovulation_date(last_period, cycle_length)
             fertile_start, fertile_end = calculate_fertile_window(ovulation_date)
             
