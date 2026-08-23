@@ -1301,6 +1301,15 @@ if 'budgets' not in st.session_state:
 if 'extracted_metrics' not in st.session_state:
     st.session_state.extracted_metrics = None
 
+# Force reload if data is empty (happens after code updates)
+# This prevents the "no data" issue after deploying new versions
+if not st.session_state.settings or len(st.session_state.settings) == 0:
+    st.session_state.settings = load_settings()
+if not st.session_state.expenses or len(st.session_state.expenses) == 0:
+    st.session_state.expenses = load_expenses()
+if not st.session_state.debts or len(st.session_state.debts) == 0:
+    st.session_state.debts = load_debts()
+
 # Fertility Tracking Functions
 def load_fertility_cycles():
     """Load menstrual cycle data from Google Sheets"""
@@ -1415,6 +1424,18 @@ tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping An
 with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
     
+    # Add refresh button at top
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        if st.button("🔄 Refresh Data", key="refresh_btn"):
+            st.session_state.settings = load_settings()
+            st.rerun()
+    with col2:
+        st.write("")  # spacing
+    with col3:
+        st.write("")  # spacing
+    
+    st.markdown("---")
     # Only show warning if settings are actually empty
     your_salary_current = safe_float(st.session_state.settings.get('your_salary', 0))
     if your_salary_current == 0:
