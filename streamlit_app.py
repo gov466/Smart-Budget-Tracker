@@ -2444,6 +2444,112 @@ with tabs[4]:  # Wealth Dashboard
         st.dataframe(summary_df, use_container_width=True)
     else:
         st.info("No historical spending data yet. Upload receipts to see trends!")
+    
+    st.markdown("---")
+    
+    # NEW: Weekly Breakdown for Selected Month
+    st.markdown("#### 📅 Weekly Breakdown (This Month)")
+    
+    # Calculate weekly spending for selected month
+    weekly_spending = defaultdict(float)
+    weekly_count = defaultdict(int)
+    
+    for exp in st.session_state.expenses:
+        try:
+            exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
+            exp_month = exp_date.strftime('%Y-%m')
+            
+            if exp_month == selected_month:
+                # Calculate week number (1-4) for this month
+                day_of_month = exp_date.day
+                week_num = (day_of_month - 1) // 7 + 1
+                
+                # Get date range for this week
+                week_start = exp_date - timedelta(days=exp_date.weekday())  # Monday
+                week_end = week_start + timedelta(days=6)  # Sunday
+                
+                # Only count if week is in selected month
+                if week_start.strftime('%Y-%m') == selected_month or exp_date.strftime('%Y-%m') == selected_month:
+                    week_key = f"Week {week_num} ({week_start.strftime('%b %d')} - {week_end.strftime('%b %d')})"
+                    amt = safe_float(exp.get('total', 0))
+                    weekly_spending[week_key] += amt
+        except:
+            pass
+    
+    if weekly_spending:
+        # Create bar chart for weekly breakdown
+        weeks_list = sorted(list(weekly_spending.keys()))
+        amounts_list = [weekly_spending[w] for w in weeks_list]
+        
+        fig_weekly = go.Figure(data=[
+            go.Bar(x=weeks_list, y=amounts_list, marker_color='#1f77b4', text=[f'${x:.0f}' for x in amounts_list],
+                   textposition='auto')
+        ])
+        
+        fig_weekly.update_layout(
+            title=f"Weekly Spending - {selected_month_label}",
+            xaxis_title="Week",
+            yaxis_title="Spending ($)",
+            height=350,
+            showlegend=False
+        )
+        st.plotly_chart(fig_weekly, use_container_width=True)
+        
+        # Weekly summary
+        st.markdown("**Weekly Summary:**")
+        weekly_df = pd.DataFrame({
+            'Week': weeks_list,
+            'Spending': amounts_list
+        })
+        st.dataframe(weekly_df, use_container_width=True)
+    else:
+        st.info("No spending data for this month yet.")
+    
+    st.markdown("---")
+    
+    # NEW: Month-over-Month Comparison
+    st.markdown("#### 📊 Month-over-Month Comparison")
+    
+    # Get current and previous month totals
+    if months_sorted_hist and len(months_sorted_hist) >= 1:
+        current_month_spending = sum(historical_data[selected_month].values()) if selected_month in historical_data else 0
+        
+        # Find previous month
+        if selected_month in months_sorted_hist:
+            current_idx = months_sorted_hist.index(selected_month)
+            if current_idx > 0:
+                previous_month = months_sorted_hist[current_idx - 1]
+                previous_month_spending = sum(historical_data[previous_month].values())
+                
+                # Calculate change
+                if previous_month_spending > 0:
+                    change_pct = ((current_month_spending - previous_month_spending) / previous_month_spending) * 100
+                    change_amount = current_month_spending - previous_month_spending
+                    
+                    # Display comparison
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        prev_month_label = datetime.strptime(previous_month, '%Y-%m').strftime('%B %Y')
+                        st.metric(f"{prev_month_label}", f"${previous_month_spending:.2f}")
+                    with col2:
+                        st.metric(f"{selected_month_label}", f"${current_month_spending:.2f}")
+                    with col3:
+                        if change_pct > 0:
+                            st.metric("Change", f"↑ ${change_amount:.2f}", f"+{change_pct:.1f}%", delta_color="inverse")
+                        elif change_pct < 0:
+                            st.metric("Change", f"↓ ${abs(change_amount):.2f}", f"{change_pct:.1f}%")
+                        else:
+                            st.metric("Change", f"${change_amount:.2f}", "0%")
+                    
+                    # Insight
+                    if change_pct > 10:
+                        st.warning(f"⚠️ You're spending {change_pct:.1f}% MORE than last month! Consider reducing expenses.")
+                    elif change_pct < -10:
+                        st.success(f"🎉 Great! You're spending {abs(change_pct):.1f}% LESS than last month!")
+                else:
+                    st.info("Compare with previous month when data is available.")
+    else:
+        st.info("Need at least 2 months of data to compare.")
 
 with tabs[5]:  # Health
     st.markdown("### 🏥 Health Tracking & Analysis with Trends")
