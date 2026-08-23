@@ -1045,9 +1045,21 @@ IMPORTANT:
         # Try to parse JSON
         try:
             return json.loads(response_text)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            st.error(f"JSON Parse Error: {str(e)}")
+            st.write(f"Response was: {response_text[:200]}")
             return None
-    except:
+    except KeyError as e:
+        st.error(f"❌ API Key Missing: {str(e)}")
+        st.info("💡 **Streamlit Cloud:** Go to Settings → Secrets and add `anthropic_key`")
+        st.info("💡 **Local:** Make sure `.env` has `ANTHROPIC_API_KEY=sk-ant-...`")
+        return None
+    except Exception as e:
+        st.error(f"❌ Claude API Error: {str(e)}")
+        st.write(f"Error type: {type(e).__name__}")
+        import traceback
+        with st.expander("Technical Details"):
+            st.write(traceback.format_exc())
         return None
 
 def plot_health_trend(health_metrics, metric_name):
