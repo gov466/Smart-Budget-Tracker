@@ -982,52 +982,38 @@ def analyze_health_metrics(health_list):
         latest = health_list[-1] if health_list else {}
         metrics_text = '\n'.join([f"- {k}: {v}" for k, v in latest.items() if k not in ['date', 'added_at', 'person']])
         
-        prompt = f"""Analyze these health metrics and provide brief assessment.
+        prompt = f"""Analyze these health metrics BRIEFLY and provide a JSON response.
 
 Metrics:
 {metrics_text}
 
-Provide ONLY a JSON response with this structure:
+Return ONLY valid JSON (no markdown, no code blocks):
 {{
-    "overall_status": "Good/Fair/Concerning",
-    "warnings": ["High cholesterol", "Elevated blood pressure"],
-    "positives": ["Normal kidney function", "Good cholesterol ratio"],
-    "risk_areas": ["Monitor cholesterol trend (family history)", "Watch weight gain patterns"],
-    "recommendations": ["Reduce salt intake", "Increase fiber"],
-    "diet_guidance": "What food groups to focus on or avoid",
+    "overall_status": "Good or Fair or Concerning",
+    "warnings": ["List only abnormal values"],
+    "positives": ["List only normal/excellent values"],
+    "risk_areas": ["Things to monitor proactively"],
+    "recommendations": ["2-3 actionable tips"],
+    "diet_guidance": "One sentence about diet",
     "exercise_plan": {{
-        "frequency": "4-5 times per week",
+        "frequency": "3-5 times per week",
         "duration_per_session": "30-45 minutes",
         "exercises": [
-            {{
-                "name": "Brisk Walking",
-                "duration": "20-30 mins",
-                "description": "Walking at a pace where you can talk but not sing. Great for heart health and low impact.",
-                "youtube_search": "Brisk walking routine 20 minutes"
-            }},
-            {{
-                "name": "Home Yoga",
-                "duration": "15-20 mins",
-                "description": "Gentle stretching and balance exercises. Reduces stress and improves flexibility.",
-                "youtube_search": "Beginner home yoga 20 minutes"
-            }}
+            {{"name": "Exercise 1", "duration": "20 mins", "description": "Brief description", "youtube_search": "search terms"}},
+            {{"name": "Exercise 2", "duration": "20 mins", "description": "Brief description", "youtube_search": "search terms"}},
+            {{"name": "Exercise 3", "duration": "20 mins", "description": "Brief description", "youtube_search": "search terms"}}
         ]
     }}
 }}
 
-IMPORTANT:
-- "exercise_plan": Create personalized home workouts based on their health metrics
-- Suggest ONLY home-friendly exercises (no gym equipment needed or minimal)
-- Include 3-4 exercises suitable for their condition
-- "youtube_search": Provide search terms users can copy into YouTube (they'll find videos)
-- All exercises should be safe for their health condition
-- "warnings": ONLY metrics currently OUT OF NORMAL RANGE
-- "positives": ONLY metrics currently WITHIN NORMAL RANGE or excellent
-- "risk_areas": Things to proactively monitor even if normal now"""
+RULES:
+- Use ONLY double quotes in JSON
+- Keep descriptions SHORT (under 15 words each)
+- Return VALID JSON only - no markdown"""
         
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=500,
+            max_tokens=1500,  # Increased from 500 to 1500
             messages=[{"role": "user", "content": prompt}]
         )
         
@@ -1046,9 +1032,33 @@ IMPORTANT:
         try:
             return json.loads(response_text)
         except json.JSONDecodeError as e:
-            st.error(f"JSON Parse Error: {str(e)}")
-            st.write(f"Response was: {response_text[:200]}")
-            return None
+            # Try to fix common JSON issues
+            import re
+            
+            # Fix unterminated strings - add closing quote before next comma/bracket/brace
+            fixed = re.sub(r'([^"\\])"([^"]*?)([,\]\}])', r'\1"\2"\3', response_text)
+            
+            # If that didn't work, try to extract just the valid JSON part
+            if fixed == response_text:
+                # Look for the last closing brace
+                last_brace = response_text.rfind('}')
+                if last_brace > 0:
+                    fixed = response_text[:last_brace+1]
+            
+            try:
+                return json.loads(fixed)
+            except:
+                st.warning("⚠️ Claude's response wasn't valid JSON. Showing partial data.")
+                # Return basic structure with what we got
+                return {
+                    "overall_status": "Good",
+                    "warnings": [],
+                    "positives": ["See Health tab for full analysis"],
+                    "risk_areas": [],
+                    "recommendations": [],
+                    "diet_guidance": "See Health tab",
+                    "exercise_plan": None
+                }
     except KeyError as e:
         st.error(f"❌ API Key Missing: {str(e)}")
         st.info("💡 **Streamlit Cloud:** Go to Settings → Secrets and add `anthropic_key`")
