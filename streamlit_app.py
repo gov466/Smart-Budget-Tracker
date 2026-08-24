@@ -20,6 +20,7 @@ import gspread
 import json
 import os
 import base64
+import calendar
 from datetime import datetime, timedelta
 from collections import defaultdict
 from PIL import Image
@@ -2400,8 +2401,16 @@ with tabs[4]:  # Wealth Dashboard
             pass
     
     if historical_data:
-        # Sort months
-        months_sorted_hist = sorted(list(historical_data.keys()))
+        # Filter to only show last 24 months (avoid old test data)
+        today = datetime.now()
+        cutoff_date = today - timedelta(days=730)  # Last 24 months
+        
+        # Sort months and filter
+        months_sorted_hist = sorted([m for m in historical_data.keys() if datetime.strptime(m, '%Y-%m') >= cutoff_date])
+        
+        if not months_sorted_hist:
+            # If no data in last 24 months, show all data
+            months_sorted_hist = sorted(list(historical_data.keys()))
         
         # Create line chart with multiple categories
         fig_trend = go.Figure()
@@ -2452,7 +2461,6 @@ with tabs[4]:  # Wealth Dashboard
     
     # Calculate weekly spending for selected month
     weekly_spending = defaultdict(float)
-    weekly_count = defaultdict(int)
     
     for exp in st.session_state.expenses:
         try:
@@ -2460,25 +2468,35 @@ with tabs[4]:  # Wealth Dashboard
             exp_month = exp_date.strftime('%Y-%m')
             
             if exp_month == selected_month:
-                # Calculate week number (1-4) for this month
+                # Calculate week number based on day of month (not calendar weeks)
                 day_of_month = exp_date.day
                 week_num = (day_of_month - 1) // 7 + 1
                 
-                # Get date range for this week
-                week_start = exp_date - timedelta(days=exp_date.weekday())  # Monday
-                week_end = week_start + timedelta(days=6)  # Sunday
+                # Calculate week date range (by day of month, not calendar)
+                week_start_day = (week_num - 1) * 7 + 1
+                week_end_day = min(week_num * 7, 31)
                 
-                # Only count if week is in selected month
-                if week_start.strftime('%Y-%m') == selected_month or exp_date.strftime('%Y-%m') == selected_month:
-                    week_key = f"Week {week_num} ({week_start.strftime('%b %d')} - {week_end.strftime('%b %d')})"
-                    amt = safe_float(exp.get('total', 0))
-                    weekly_spending[week_key] += amt
+                # Create week key using actual dates
+                month_obj = exp_date
+                week_start = month_obj.replace(day=week_start_day)
+                
+                # Handle months with fewer than 31 days
+                try:
+                    week_end = month_obj.replace(day=week_end_day)
+                except ValueError:
+                    max_day = calendar.monthrange(month_obj.year, month_obj.month)[1]
+                    week_end = month_obj.replace(day=max(min(week_end_day, max_day), 1))
+                
+                week_key = f"Week {week_num} ({week_start.strftime('%b %d')} - {week_end.strftime('%b %d')})"
+                amt = safe_float(exp.get('total', 0))
+                weekly_spending[week_key] += amt
         except:
             pass
     
     if weekly_spending:
         # Create bar chart for weekly breakdown
-        weeks_list = sorted(list(weekly_spending.keys()))
+        # Sort by week number (numeric), not alphabetically
+        weeks_list = sorted(list(weekly_spending.keys()), key=lambda x: int(x.split()[1]))
         amounts_list = [weekly_spending[w] for w in weeks_list]
         
         fig_weekly = go.Figure(data=[
