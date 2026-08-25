@@ -50,6 +50,7 @@ def safe_float(value, default=0.0):
     except (ValueError, TypeError):
         return default
 
+@st.cache_resource
 def get_gsheet_client():
     """Connect to Google Sheets using credentials from Streamlit secrets"""
     try:
@@ -87,6 +88,7 @@ def ensure_headers(ws, headers):
         except:
             pass
 
+@st.cache_data(ttl=300)
 def get_or_create_worksheet(sheet, name, headers):
     """Get worksheet by name or create if it doesn't exist"""
     try:
