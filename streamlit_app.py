@@ -1433,10 +1433,10 @@ def load_wellness_logs():
     except:
         return []
 
-# Headers for wellness log worksheet
+# Headers for wellness log worksheet (15 fields)
 WELLNESS_HEADERS = [
-    "date", "person", "exercise", "water", "sleep", "mood", 
-    "stress", "symptoms", "medications", "steps", "diet_notes", "notes"
+    "date", "person", "exercise", "exercise_name", "water", "pee_count", "poop_count",
+    "sleep", "mood", "stress", "symptoms", "medications", "steps", "diet_notes", "notes"
 ]
 
 def save_wellness_log(wellness_data):
@@ -1478,7 +1478,10 @@ def save_wellness_log(wellness_data):
                         log_entry["date"],
                         log_entry["person"],
                         log_entry["exercise"],
+                        log_entry["exercise_name"],
                         log_entry["water"],
+                        log_entry["pee_count"],
+                        log_entry["poop_count"],
                         log_entry["sleep"],
                         log_entry["mood"],
                         log_entry["stress"],
