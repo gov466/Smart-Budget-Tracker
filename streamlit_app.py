@@ -1433,8 +1433,14 @@ def load_wellness_logs():
     except:
         return []
 
+# Headers for wellness log worksheet
+WELLNESS_HEADERS = [
+    "date", "person", "exercise", "water", "sleep", "mood", 
+    "stress", "symptoms", "medications", "steps", "diet_notes", "notes"
+]
+
 def save_wellness_log(wellness_data):
-    """Save wellness log locally (Google Sheets sync coming soon)"""
+    """Save wellness log to Google Sheets + local session state"""
     try:
         # Initialize session state storage if needed
         if "wellness_logs" not in st.session_state:
@@ -1483,8 +1489,17 @@ def save_wellness_log(wellness_data):
                         log_entry["notes"]
                     ]
                     ws.append_row(row)
-        except:
-            pass  # Silently fail Google Sheets sync, local save still works
+                    print(f"✅ Wellness log synced to Google Sheets: {log_entry['date']} - {log_entry['person']}")
+                else:
+                    print(f"⚠️  Could not get worksheet 'Daily Log' from Google Sheets")
+            else:
+                print(f"⚠️  Google Sheets client not available (credentials may not be configured)")
+        except Exception as gs_error:
+            print(f"❌ Google Sheets sync error: {str(gs_error)}")
+            import traceback
+            print("Traceback:")
+            traceback.print_exc()
+            # Don't fail - local save still works
         
         return True
     except Exception as e:
