@@ -1439,7 +1439,46 @@ WELLNESS_HEADERS = [
     "sleep", "mood", "stress", "symptoms", "medications", "steps", "diet_notes", "notes"
 ]
 
-def save_wellness_log(wellness_data):
+def save_meals_to_gsheet(meals_data):
+    """Save nutrition meals to Google Sheets"""
+    try:
+        sheet = get_gsheet_client()
+        if sheet is None:
+            print("⚠️  Google Sheets client not available")
+            return False
+        
+        # Define headers for meals worksheet
+        headers = ["date", "person", "meal_type", "description", "time", "comfort_score", "protein_g", "carbs_g", "fat_g", "fiber_g", "calories", "notes"]
+        ws = get_or_create_worksheet(sheet, "Meals", headers)
+        
+        if ws is None:
+            print("⚠️  Could not access Meals worksheet")
+            return False
+        
+        # Save each meal
+        for meal_type, meal_info in meals_data.items():
+            if meal_info.get("description"):
+                row = [
+                    str(datetime.now().date()),
+                    "User",  # Person (can be customized)
+                    meal_type,
+                    meal_info.get("description", ""),
+                    str(meal_info.get("time", "")),
+                    str(meal_info.get("comfort_score", "")),
+                    "",  # protein_g (to be filled by Claude analysis)
+                    "",  # carbs_g
+                    "",  # fat_g
+                    "",  # fiber_g
+                    "",  # calories
+                    meal_info.get("notes", "")
+                ]
+                ws.append_row(row)
+                print(f"✅ Saved {meal_type}: {meal_info.get('description', '')}")
+        
+        return True
+    except Exception as e:
+        print(f"❌ Error saving meals to Google Sheets: {str(e)}")
+        return False
     """Save wellness log to Google Sheets + local session state"""
     try:
         # Initialize session state storage if needed
@@ -3424,7 +3463,32 @@ Provide ONLY valid JSON (no markdown):
         mood_notes = st.text_area("Mood & notes", placeholder="How do you feel today?", key="mood_notes")
         
         if st.button("💾 Save Today's Meals", key="save_meals"):
-            st.success("✅ Meals saved! (Google Sheets integration ready)")
+            meals_data = {
+                "breakfast": {
+                    "description": breakfast_text,
+                    "time": str(breakfast_time),
+                    "comfort_score": breakfast_comfort,
+                    "notes": mood_notes
+                },
+                "lunch": {
+                    "description": lunch_text,
+                    "time": str(lunch_time),
+                    "comfort_score": lunch_comfort,
+                    "notes": mood_notes
+                },
+                "dinner": {
+                    "description": dinner_text,
+                    "time": str(dinner_time),
+                    "comfort_score": dinner_comfort,
+                    "notes": mood_notes
+                }
+            }
+            
+            if save_meals_to_gsheet(meals_data):
+                st.success("✅ Meals saved to Google Sheets! 📊")
+                st.info(f"💡 Logged {sum(1 for m in meals_data.values() if m.get('description'))} meals today")
+            else:
+                st.warning("⚠️  Saved locally (Google Sheets not available yet)")
     
     # ========== TAB 2: DAILY ANALYSIS ==========
     with nutrition_tabs[1]:
