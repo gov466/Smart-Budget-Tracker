@@ -3476,7 +3476,7 @@ Provide ONLY valid JSON (no markdown):
                 "Big Mac": {"protein": 25, "carbs": 45, "fat": 30, "fiber": 2, "cal": 550},
             },
             "Subway": {
-                "6" Turkey": {"protein": 18, "carbs": 45, "fat": 5, "fiber": 4, "cal": 320},
+                '6" Turkey': {"protein": 18, "carbs": 45, "fat": 5, "fiber": 4, "cal": 320},
             },
             "Chipotle": {
                 "Chicken Bowl": {"protein": 30, "carbs": 60, "fat": 15, "fiber": 12, "cal": 520},
