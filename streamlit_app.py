@@ -89,14 +89,14 @@ def ensure_headers(ws, headers):
             pass
 
 @st.cache_data(ttl=300)
-def get_or_create_worksheet(sheet, name, headers):
+def get_or_create_worksheet(_sheet, name, headers):
     """Get worksheet by name or create if it doesn't exist"""
     try:
-        ws = sheet.worksheet(name)
+        ws = _sheet.worksheet(name)
         ensure_headers(ws, headers)
         return ws
     except:
-        ws = sheet.add_worksheet(title=name, rows=1000, cols=20)
+        ws = _sheet.add_worksheet(title=name, rows=1000, cols=20)
         ws.append_row(headers)
         return ws
 
