@@ -1393,15 +1393,22 @@ def calculate_fertile_window(ovulation_date):
 def analyze_cycle_patterns(cycles):
     """Analyze menstrual cycle patterns"""
     if not cycles or len(cycles) < 2:
+        print(f"⚠️  Cannot analyze: need at least 2 cycles, have {len(cycles) if cycles else 0}")
         return None
     
     try:
         cycle_lengths = []
         for cycle in cycles:
             if cycle.get('cycle_length'):
-                cycle_lengths.append(int(cycle['cycle_length']))
+                try:
+                    length = int(cycle['cycle_length'])
+                    cycle_lengths.append(length)
+                    print(f"  ✅ Loaded cycle: {cycle.get('date_start', 'N/A')} - Length: {length} days")
+                except ValueError:
+                    print(f"  ⚠️  Invalid cycle length: {cycle.get('cycle_length')} for {cycle.get('date_start', 'N/A')}")
         
         if not cycle_lengths:
+            print("❌ No valid cycle lengths found!")
             return None
         
         avg_length = sum(cycle_lengths) / len(cycle_lengths)
@@ -1411,6 +1418,8 @@ def analyze_cycle_patterns(cycles):
         # Check if regular (±2 days variation)
         is_regular = (max_length - min_length) <= 2
         
+        print(f"✅ Analysis complete: {len(cycle_lengths)} cycles, avg={avg_length:.1f}, regular={is_regular}")
+        
         return {
             'average_cycle_length': round(avg_length, 1),
             'min_cycle_length': min_length,
@@ -1419,7 +1428,10 @@ def analyze_cycle_patterns(cycles):
             'is_regular': is_regular,
             'cycle_lengths': cycle_lengths
         }
-    except:
+    except Exception as e:
+        print(f"❌ Error analyzing cycles: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def get_conception_probability(cycle_analysis):
@@ -1436,6 +1448,65 @@ def get_conception_probability(cycle_analysis):
     
     # Convert to percentage
     return round(base_prob * 100, 1)
+
+def generate_shopping_list(meal_plan):
+    """Generate organized shopping list from planned meals using Claude AI"""
+    if not meal_plan or meal_plan.strip() == "":
+        return None
+    
+    try:
+        from anthropic import Anthropic
+        import os
+        
+        api_key = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
+        if not api_key:
+            print("❌ ANTHROPIC_API_KEY not found")
+            return None
+        
+        client = Anthropic()
+        
+        prompt = f"""Analyze these planned meals and generate an organized shopping list.
+
+Planned Meals:
+{meal_plan}
+
+Generate a shopping list organized by categories:
+- 🥬 Produce (vegetables, fruits)
+- 🍖 Proteins (meat, fish, eggs, tofu, beans)
+- 🌾 Grains & Carbs (rice, pasta, bread, oats)
+- 🥛 Dairy & Alternatives (milk, cheese, yogurt)
+- 🥫 Pantry Staples (oils, spices, sauces)
+
+Format as:
+**🥬 Produce**
+- Item 1
+- Item 2
+
+**🍖 Proteins**
+- Item 1
+- Item 2
+
+(continue for all categories)
+
+Be specific with quantities where possible (e.g., "2 lbs chicken breast" not just "chicken")."""
+
+        response = client.messages.create(
+            model="claude-haiku-4.5",
+            max_tokens=1000,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        shopping_list = response.content[0].text
+        print(f"✅ Shopping list generated successfully")
+        return shopping_list
+        
+    except Exception as e:
+        print(f"❌ Error generating shopping list: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 # Daily Wellness Logging Functions
 def load_wellness_logs():
@@ -3663,13 +3734,31 @@ Provide ONLY valid JSON (no markdown):
         
         planned_meals = st.text_area(
             "Plan meals for the week",
-            placeholder="Monday: Salad, Pasta\nTuesday: Tacos, Curry",
+            placeholder="Monday: Salad, Pasta\nTuesday: Tacos, Curry\nWednesday: Grilled chicken, rice, broccoli",
             height=120,
             key="planned_meals"
         )
         
         if st.button("📋 Generate Shopping List"):
-            st.info("✅ Shopping list generation (Claude AI integration ready)")
+            if planned_meals.strip():
+                with st.spinner("🤔 Generating shopping list..."):
+                    shopping_list = generate_shopping_list(planned_meals)
+                    
+                    if shopping_list:
+                        st.success("✅ Shopping list generated!")
+                        st.markdown(shopping_list)
+                        
+                        # Option to save to file
+                        st.download_button(
+                            label="📥 Download Shopping List",
+                            data=shopping_list,
+                            file_name="shopping_list.txt",
+                            mime="text/plain"
+                        )
+                    else:
+                        st.error("❌ Could not generate shopping list. Check your API key!")
+            else:
+                st.warning("⚠️ Please enter your planned meals first!")
     
     # ========== TAB 9: MOOD CORRELATION ==========
     with nutrition_tabs[8]:
@@ -3696,9 +3785,24 @@ with tabs[9]:  # Fertility Tracker
     col1, col2 = st.columns([2, 1])
     with col1:
         st.markdown("#### Amrithavarshini's Fertility Tracking")
+    with col2:
+        if st.button("🔄 Refresh Cycles"):
+            st.cache_resource.clear()
+            st.cache_data.clear()
+            st.rerun()
     
     # Load fertility cycles
     fertility_cycles = load_fertility_cycles()
+    
+    # Debug info
+    with st.expander("🔍 Debug Info (Cycles Loading)"):
+        st.write(f"📊 Total cycles loaded: {len(fertility_cycles) if fertility_cycles else 0}")
+        if fertility_cycles:
+            st.write(f"📋 Cycle dates loaded:")
+            for cycle in fertility_cycles:
+                st.write(f"  - {cycle.get('date_start', 'N/A')} to {cycle.get('date_end', 'N/A')} ({cycle.get('cycle_length', '?')} days)")
+        else:
+            st.warning("⚠️  No cycles loaded from Google Sheets. Check credentials!")
     
     # Tabs within fertility tracker
     fert_tabs = st.tabs(["📅 Add/View Cycles", "📊 Cycle Analysis", "🎯 Ovulation Prediction", "👶 Conception Tips"])
@@ -3807,7 +3911,14 @@ with tabs[9]:  # Fertility Tracker
     
     # Tab 2: Cycle Analysis
     with fert_tabs[1]:
-        if fertility_cycles and len(fertility_cycles) >= 2:
+        st.markdown("## 📊 Cycle Analysis")
+        
+        if not fertility_cycles:
+            st.warning("⚠️  No cycles found. Add at least 2 cycles to see analysis.")
+        elif len(fertility_cycles) < 2:
+            st.info(f"📝 Add at least 2 cycle records to see analysis. Currently you have {len(fertility_cycles)} cycle recorded.")
+        else:
+            print(f"🔍 Analyzing {len(fertility_cycles)} cycles...")
             cycle_analysis = analyze_cycle_patterns(fertility_cycles)
             
             if cycle_analysis:
@@ -3854,9 +3965,14 @@ with tabs[9]:  # Fertility Tracker
                     st.success("✅ Your cycles are VERY REGULAR! This is ideal for conception planning. You can predict ovulation with high accuracy!")
                 else:
                     st.warning("⚠️ Your cycles vary by more than 2 days. Track more cycles to get better predictions. Still trackable, just less predictable.")
-        else:
-            st.info("📝 Add at least 2 cycle records to see analysis. Currently you have " + 
-                   f"{len(fertility_cycles)} cycles recorded.")
+            else:
+                st.error("❌ Could not analyze cycles. Check the debug info above for details.")
+                with st.expander("🔍 Troubleshooting"):
+                    st.write("Possible issues:")
+                    st.write("1. Cycle lengths are not numeric values")
+                    st.write("2. Cycles don't have 'cycle_length' field")
+                    st.write("3. JSON parsing error - check Google Sheets data format")
+                    st.write("\nClick 'Refresh Cycles' at the top to reload data from Google Sheets.")
     
     # Tab 3: Ovulation Prediction
     with fert_tabs[2]:
