@@ -115,11 +115,25 @@ def load_settings():
             return {}
         headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
         ws = get_or_create_worksheet(sheet, "Settings", headers)
-        data = ws.get_all_records()
+        
+        try:
+            data = ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_settings, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return {}
+            data = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    data.append(record)
+        
         if data:
             return data[0]
         return {}
-    except:
+    except Exception as e:
+        print(f"Error loading settings: {str(e)}")
         return {}
 
 def load_expenses():
@@ -130,7 +144,20 @@ def load_expenses():
             return []
         headers = ['merchant', 'date', 'total', 'category', 'items', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Expenses", headers)
-        records = ws.get_all_records()
+        
+        try:
+            records = ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_expenses, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    records.append(record)
+        
         # Parse items JSON if present
         for record in records:
             if 'items' in record and record['items']:
@@ -139,7 +166,8 @@ def load_expenses():
                 except:
                     record['items'] = []
         return records
-    except:
+    except Exception as e:
+        print(f"Error loading expenses: {str(e)}")
         return []
 
 def load_debts():
@@ -147,14 +175,40 @@ def load_debts():
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            print("⚠️  Google Sheets client not available")
             return []
         headers = ['name', 'principal', 'monthly_payment', 'interest_rate', 'months_to_payoff', 'created_date']
         ws = get_or_create_worksheet(sheet, "Debts", headers)
-        records = ws.get_all_records()
+        
+        if ws is None:
+            print("⚠️  Could not access Debts worksheet")
+            return []
+        
+        # Try get_all_records first (more compatible)
+        try:
+            records = ws.get_all_records()
+        except AttributeError as ae:
+            print(f"⚠️  AuthorizedSession error (gspread version issue): {str(ae)}")
+            print("Falling back to manual parsing...")
+            # Fallback: use get_all_values and parse manually
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {}
+                    for i, header in enumerate(headers):
+                        if i < len(row):
+                            record[header] = row[i]
+                    records.append(record)
         
         # Debug: show how many records we got
         if len(records) == 0:
-            st.warning("⚠️ No debts loaded from Google Sheets. Check if headers are in row 1.")
+            print("📋 No debts loaded from Google Sheets")
+        else:
+            print(f"✅ Loaded {len(records)} debts")
         
         # Convert string numbers to float
         for record in records:
@@ -166,7 +220,9 @@ def load_debts():
                 record['interest_rate'] = safe_float(record['interest_rate'])
         return records
     except Exception as e:
-        st.error(f"Error loading debts: {str(e)}")
+        print(f"❌ Error loading debts: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def load_health():
@@ -177,8 +233,22 @@ def load_health():
             return []
         headers = ['date', 'metric', 'value', 'unit', 'normal_range', 'type', 'person', 'added_at']
         ws = get_or_create_worksheet(sheet, "Health", headers)
-        return ws.get_all_records()
-    except:
+        
+        try:
+            return ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_health, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    records.append(record)
+            return records
+    except Exception as e:
+        print(f"Error loading health: {str(e)}")
         return []
 
 def load_budgets():
@@ -189,11 +259,25 @@ def load_budgets():
             return {}
         headers = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
         ws = get_or_create_worksheet(sheet, "Budget", headers)
-        data = ws.get_all_records()
+        
+        try:
+            data = ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_budgets, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return {}
+            data = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    data.append(record)
+        
         if data:
             return data[0]
         return {}
-    except:
+    except Exception as e:
+        print(f"Error loading budgets: {str(e)}")
         return {}
 
 def save_debt_to_gsheet(debt):
@@ -1346,8 +1430,22 @@ def load_fertility_cycles():
             return []
         headers = ['date_start', 'date_end', 'cycle_length', 'cervical_fluid', 'temperature', 'symptoms', 'notes', 'added_at']
         ws = get_or_create_worksheet(sheet, "Fertility Cycles", headers)
-        return ws.get_all_records()
-    except:
+        
+        try:
+            return ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_fertility_cycles, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    records.append(record)
+            return records
+    except Exception as e:
+        print(f"Error loading fertility cycles: {str(e)}")
         return []
 
 def save_cycle_to_gsheet(cycle_data):
@@ -1543,8 +1641,22 @@ def load_wellness_logs():
                    'sleep_hours', 'mood_score', 'stress_score', 'symptoms', 'medications_taken', 'steps', 
                    'diet_notes', 'notes', 'added_at']
         ws = get_or_create_worksheet(sheet, "Daily Wellness Log", headers)
-        return ws.get_all_records()
-    except:
+        
+        try:
+            return ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_wellness_logs, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    records.append(record)
+            return records
+    except Exception as e:
+        print(f"Error loading wellness logs: {str(e)}")
         return []
 
 # Headers for wellness log worksheet (15 fields)
@@ -3837,9 +3949,19 @@ with tabs[9]:  # Fertility Tracker
         
         col1, col2 = st.columns(2)
         with col1:
-            period_start = st.date_input("Period Start Date", value=None, key="period_start")
+            period_start = st.date_input(
+                "Period Start Date",
+                value=datetime.now().date(),
+                key="period_start",
+                help="Click the calendar icon to select your period start date"
+            )
         with col2:
-            period_end = st.date_input("Period End Date", value=None, key="period_end")
+            period_end = st.date_input(
+                "Period End Date",
+                value=datetime.now().date(),
+                key="period_end",
+                help="Click the calendar icon to select your period end date"
+            )
         
         # AUTO-CALCULATE cycle length from previous period
         calculated_cycle_length = 28  # Default
