@@ -1327,22 +1327,36 @@ def load_fertility_cycles():
         return []
 
 def save_cycle_to_gsheet(cycle_data):
-    """Save a menstrual cycle to Google Sheets"""
+    """Save a menstrual cycle to Google Sheets with proper duplicate detection"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            print("❌ Google Sheets client not available")
             return False
         
         headers = ['date_start', 'date_end', 'cycle_length', 'cervical_fluid', 'temperature', 'symptoms', 'notes', 'added_at']
         ws = get_or_create_worksheet(sheet, "Fertility Cycles", headers)
         
-        # Check for duplicates
+        if ws is None:
+            print("❌ Could not access Fertility Cycles worksheet")
+            return False
+        
+        # Check for duplicates - normalize date format
         existing = ws.get_all_records()
+        new_start_date = str(cycle_data.get('date_start', '')).strip()
+        
+        print(f"📋 Checking for duplicates of start date: {new_start_date}")
+        print(f"📋 Existing {len(existing)} cycles in worksheet")
+        
         for record in existing:
-            if record.get('date_start') == cycle_data['date_start']:
-                return False  # Duplicate found
+            existing_start = str(record.get('date_start', '')).strip()
+            print(f"  Comparing: '{new_start_date}' vs '{existing_start}'")
+            if existing_start == new_start_date:
+                print(f"❌ Duplicate found: {new_start_date}")
+                return False
         
         # Append new record
+        print(f"✅ No duplicate found, saving cycle: {new_start_date} to {cycle_data.get('date_end', '')}")
         ws.append_row([
             cycle_data.get('date_start', ''),
             cycle_data.get('date_end', ''),
@@ -1353,8 +1367,13 @@ def save_cycle_to_gsheet(cycle_data):
             cycle_data.get('notes', ''),
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ])
+        print(f"✅ Cycle saved successfully!")
         return True
-    except:
+        
+    except Exception as e:
+        print(f"❌ Error saving cycle to Google Sheets: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def calculate_ovulation_date(period_start_date, cycle_length=28):
