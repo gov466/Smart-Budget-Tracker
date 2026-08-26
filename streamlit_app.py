@@ -65,24 +65,31 @@ def get_gsheet_client():
 def ensure_headers(ws, headers):
     """Ensure worksheet has proper headers - insert if needed"""
     try:
-        all_values = ws.get_all_values()
-        
-        # If worksheet is completely empty, add headers
-        if not all_values:
-            ws.insert_row(headers, 1)
-            return
-        
-        # Check if first row matches headers
-        first_row = all_values[0]
-        
-        # If headers don't match, insert new headers at top
-        if first_row != headers:
-            # Clear the sheet
-            if len(all_values) > 0:
+        # Try to get all records (more compatible with gspread versions)
+        try:
+            all_records = ws.get_all_records()
+            if not all_records:
+                ws.insert_row(headers, 1)
+                return
+        except AttributeError:
+            # Fallback to get_all_values if get_all_records fails
+            all_values = ws.get_all_values()
+            
+            # If worksheet is completely empty, add headers
+            if not all_values:
+                ws.insert_row(headers, 1)
+                return
+            
+            # Check if first row matches headers
+            first_row = all_values[0]
+            
+            # If headers don't match, insert new headers at top
+            if first_row != headers:
                 # Insert headers at row 1
                 ws.insert_row(headers, 1)
     except Exception as e:
-        # If any error, try to add headers anyway
+        print(f"⚠️  Error ensuring headers: {str(e)}")
+        # Continue anyway - headers might already be there
         try:
             ws.insert_row(headers, 1)
         except:
@@ -350,25 +357,42 @@ def load_price_history_from_gsheet():
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            print("⚠️  Google Sheets client not available")
             return pd.DataFrame()
         
         headers = ['date', 'store', 'product', 'quantity', 'price', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Price_History", headers)
         
-        data = ws.get_all_values()
-        if len(data) <= 1:  # Only headers
+        if ws is None:
+            print("⚠️  Could not access Price_History worksheet")
+            return pd.DataFrame()
+        
+        # Use get_all_records instead of get_all_values for better compatibility
+        try:
+            records = ws.get_all_records()
+            if not records:
+                print("📊 No price history records found")
+                return pd.DataFrame(columns=headers)
+            
+            df = pd.DataFrame(records)
+            
+            # Convert data types
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            df['price'] = df['price'].apply(lambda x: safe_float(x))
+            df['quantity'] = df['quantity'].apply(lambda x: int(safe_float(x)) if safe_float(x) > 0 else 1)
+            
+            print(f"✅ Loaded {len(df)} price history records")
+            return df
+            
+        except AttributeError as ae:
+            print(f"⚠️  AuthorizedSession error (gspread version issue): {str(ae)}")
+            print("Falling back to empty dataframe")
             return pd.DataFrame(columns=headers)
-        
-        df = pd.DataFrame(data[1:], columns=headers)
-        
-        # Convert data types
-        df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        df['price'] = df['price'].apply(lambda x: safe_float(x))
-        df['quantity'] = df['quantity'].apply(lambda x: int(safe_float(x)) if safe_float(x) > 0 else 1)
-        
-        return df
+            
     except Exception as e:
-        st.error(f"Error loading price history: {str(e)}")
+        print(f"❌ Error loading price history: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
 def analyze_product_price_trends(df, product_name):
