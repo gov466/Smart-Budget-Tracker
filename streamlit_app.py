@@ -269,32 +269,50 @@ def load_health():
         return []
 
 def load_budgets():
-    """Load budgets from Google Sheets"""
+    """Load budgets from Google Sheets - SIMPLIFIED"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            print("❌ No Google Sheets client")
             return {}
+        
         headers = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
-        ws = get_or_create_worksheet(sheet, "Budget", headers)
         
+        # Get or create Budget worksheet
         try:
-            data = ws.get_all_records()
-        except AttributeError:
-            print("⚠️  AuthorizedSession error in load_budgets, using fallback")
-            all_values = ws.get_all_values()
-            if len(all_values) <= 1:
-                return {}
-            data = []
-            for row in all_values[1:]:
-                if row:
-                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
-                    data.append(record)
+            ws = sheet.worksheet("Budget")
+        except:
+            print("⚠️ Budget worksheet doesn't exist yet")
+            return {}
         
-        if data:
-            return data[0]
-        return {}
+        # Get all values from worksheet
+        try:
+            all_values = ws.get_all_values()
+        except Exception as e:
+            print(f"❌ Failed to read Budget worksheet: {str(e)}")
+            return {}
+        
+        # Check if we have data
+        if len(all_values) < 2:
+            print("📋 No budget data found (need headers + data row)")
+            return {}
+        
+        # Get row 2 (data row)
+        row_data = all_values[1]
+        
+        # Convert to dictionary
+        budgets = {}
+        for i, header in enumerate(headers):
+            if i < len(row_data):
+                budgets[header] = safe_float(row_data[i])  # Convert to float for budgets
+            else:
+                budgets[header] = 0.0
+        
+        print(f"✅ Budgets loaded")
+        return budgets
+            
     except Exception as e:
-        print(f"Error loading budgets: {str(e)}")
+        print(f"❌ Error loading budgets: {str(e)}")
         return {}
 
 def save_debt_to_gsheet(debt):
@@ -653,44 +671,39 @@ def save_settings_to_gsheet(settings):
         return False
 
 def save_budgets_to_gsheet(budgets):
-    """Save budgets to Google Sheets - SEPARATE Budget worksheet"""
+    """Save budgets to Google Sheets - SIMPLIFIED"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
-            st.error("❌ Error: Cannot connect to Google Sheets")
+            print("❌ No Google Sheets client")
             return False
         
-        # Get or create BUDGET worksheet (NOT Settings!)
+        headers = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
+        
+        # Get or create Budget worksheet
         try:
             ws = sheet.worksheet("Budget")
+            print("📝 Found existing Budget worksheet")
         except:
-            st.info("Creating 'Budget' worksheet...")
-            ws = sheet.add_worksheet(title="Budget", rows=1000, cols=20)
+            print("📝 Creating new Budget worksheet...")
+            ws = sheet.add_worksheet(title="Budget", rows=1000, cols=10)
         
-        # Get headers from budgets dict
-        headers = list(budgets.keys())
+        # Prepare data row with actual values
+        data_row = [str(budgets.get(k, 0)) for k in headers]
         
-        # Clear and add headers
+        # Clear and rebuild
         try:
             ws.clear()
             ws.insert_row(headers, 1)
-        except:
-            pass
-        
-        # Prepare data
-        values = [str(budgets.get(k, '')) for k in headers]
-        
-        # Append row
-        try:
-            ws.append_row(values)
-            st.success("✅ Budgets saved to Google Sheets!")
+            ws.insert_row(data_row, 2)
+            print(f"✅ Budgets saved successfully")
             return True
         except Exception as e:
-            st.error(f"❌ Error appending budget row: {str(e)}")
+            print(f"❌ Error saving: {str(e)}")
             return False
             
     except Exception as e:
-        st.error(f"❌ Error in save_budgets: {str(e)}")
+        print(f"❌ Error in save_budgets: {str(e)}")
         return False
 
 def extract_images_from_pdf(pdf_bytes):
