@@ -108,58 +108,49 @@ def get_or_create_worksheet(_sheet, name, headers):
         return ws
 
 def load_settings():
-    """Load settings from Google Sheets"""
+    """Load settings from Google Sheets - SIMPLIFIED"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
-            print("⚠️  Google Sheets client not available")
+            print("❌ No Google Sheets client")
             return {}
         
         headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent', 'tfsa_rrsp_start_date']
         
-        ws = get_or_create_worksheet(sheet, "Settings", headers)
-        
-        if ws is None:
-            print("⚠️  Could not access Settings worksheet")
-            return {}
-        
         try:
-            # Try get_all_records first
-            all_records = ws.get_all_records()
-            if all_records:
-                print(f"✅ Loaded settings from row 2 (or first data row)")
-                return all_records[0]
-            else:
-                print("📋 No settings data found")
-                return {}
-                
-        except AttributeError:
-            # Fallback to get_all_values
-            print("⚠️  Using fallback method to load settings")
-            all_values = ws.get_all_values()
-            
-            if len(all_values) <= 1:
-                print("📋 No settings data found (empty worksheet)")
-                return {}
-            
-            # Get data from row 2 (row 1 is headers)
-            if len(all_values) > 1:
-                row_data = all_values[1]  # Row 2 has the data
-                settings = {}
-                for i, header in enumerate(headers):
-                    if i < len(row_data):
-                        settings[header] = row_data[i]
-                    else:
-                        settings[header] = ''
-                print(f"✅ Loaded settings (fallback method)")
-                return settings
-            
+            ws = sheet.worksheet("Settings")
+        except:
+            print("⚠️ Settings worksheet doesn't exist yet")
             return {}
+        
+        # Get all values from worksheet
+        try:
+            all_values = ws.get_all_values()
+        except Exception as e:
+            print(f"❌ Failed to read Settings worksheet: {str(e)}")
+            return {}
+        
+        # Check if we have data
+        if len(all_values) < 2:
+            print("📋 No settings data found (need headers + data row)")
+            return {}
+        
+        # Get row 2 (data row)
+        row_data = all_values[1]
+        
+        # Convert to dictionary
+        settings = {}
+        for i, header in enumerate(headers):
+            if i < len(row_data):
+                settings[header] = row_data[i]
+            else:
+                settings[header] = ''
+        
+        print(f"✅ Settings loaded: {settings.get('your_salary', 'N/A')}")
+        return settings
             
     except Exception as e:
         print(f"❌ Error loading settings: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return {}
 
 def load_expenses():
@@ -609,73 +600,56 @@ def save_health_to_gsheet(health_entry):
         return False
 
 def save_settings_to_gsheet(settings):
-    """Save settings to Google Sheets - Settings worksheet"""
+    """Save settings to Google Sheets - SIMPLIFIED"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
-            print("❌ Cannot connect to Google Sheets")
+            print("❌ No Google Sheets client")
             return False
         
         headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent', 'tfsa_rrsp_start_date']
         
-        # Get or create worksheet
+        # Get or create Settings worksheet
         try:
             ws = sheet.worksheet("Settings")
+            print("📝 Found existing Settings worksheet")
         except:
-            print("📝 Creating 'Settings' worksheet...")
+            print("📝 Creating new Settings worksheet...")
             ws = sheet.add_worksheet(title="Settings", rows=1000, cols=25)
         
-        # Ensure headers exist
+        # Get current data
         try:
             all_values = ws.get_all_values()
-            if not all_values or len(all_values) == 0:
-                print("📝 Adding headers to Settings worksheet...")
-                ws.insert_row(headers, 1)
-            elif all_values[0] != headers:
-                print("⚠️  Headers don't match, updating...")
-                ws.delete_rows(1, 1)  # Delete first row if it doesn't match
-                ws.insert_row(headers, 1)
         except:
-            print("📝 Ensuring headers...")
+            print("⚠️ Error reading worksheet, trying to clear...")
+            all_values = []
+        
+        # Ensure headers are correct
+        if not all_values or all_values[0] != headers:
+            print("📝 Adding/fixing headers...")
             try:
-                ws.insert_row(headers, 1)
+                ws.clear()
             except:
                 pass
+            ws.insert_row(headers, 1)
+            all_values = [headers]
         
         # Prepare data row
-        values = [str(settings.get(k, '')) for k in headers]
+        data_row = [str(settings.get(k, '')) for k in headers]
         
-        # Check if data already exists (row 2)
+        # Clear and rebuild
         try:
-            all_values = ws.get_all_values()
-            if len(all_values) > 1:
-                # Update existing row 2
-                print(f"♻️  Updating existing settings in row 2...")
-                ws.delete_rows(2, 1)  # Delete old data
-                ws.insert_row(values, 2)
-                print(f"✅ Settings updated in Google Sheets")
-                return True
-            else:
-                # No data yet, append new row
-                print(f"📝 Adding new settings row...")
-                ws.append_row(values)
-                print(f"✅ Settings saved to Google Sheets")
-                return True
+            ws.clear()
+            ws.insert_row(headers, 1)
+            ws.insert_row(data_row, 2)
+            print(f"✅ Settings saved successfully")
+            return True
         except Exception as e:
-            print(f"❌ Error managing rows: {str(e)}")
-            # Fallback: try to append
-            try:
-                ws.append_row(values)
-                print(f"✅ Settings saved (fallback)")
-                return True
-            except Exception as e2:
-                print(f"❌ Error appending row: {str(e2)}")
-                return False
+            print(f"❌ Error saving: {str(e)}")
+            return False
             
     except Exception as e:
         print(f"❌ Error in save_settings: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return False
 
 def save_budgets_to_gsheet(budgets):
