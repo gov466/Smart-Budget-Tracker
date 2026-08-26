@@ -2750,6 +2750,8 @@ with tabs[4]:  # Wealth Dashboard
     
     # Build historical data by month and category
     historical_data = defaultdict(lambda: defaultdict(float))
+    months_sorted_hist = []  # ✅ Initialize before use
+    
     for exp in st.session_state.expenses:
         try:
             exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
