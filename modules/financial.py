@@ -2,9 +2,9 @@
 
 import streamlit as st
 from datetime import datetime
-from ..config import DEBT_HEADERS, EXPENSE_HEADERS
-from ..gsheet_client import get_gsheet_client
-from ..utils import safe_float
+from config import DEBT_HEADERS, EXPENSE_HEADERS
+from gsheet_client import get_gsheet_client
+from utils import safe_float
 
 
 def render_debts_tab():

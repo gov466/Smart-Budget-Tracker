@@ -397,25 +397,32 @@ def save_expense_to_gsheet(expense):
         headers = ['merchant', 'date', 'total', 'category', 'items', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Expenses", headers)
         
-        # Check for duplicates before saving
-        all_data = ws.get_all_records()
+        # Check for duplicates before saving - use get_all_values to avoid AuthorizedSession error
+        try:
+            all_values = ws.get_all_values()
+        except:
+            print("⚠️  Error reading expenses, proceeding without duplicate check")
+            all_values = []
         
         expense_merchant = str(expense.get('merchant', '')).lower().strip()
         expense_date = str(expense.get('date', '')).strip()
         expense_total = safe_float(expense.get('total', 0))
         
         # Look for duplicate receipts (same merchant, same date, same total)
-        for existing in all_data:
-            existing_merchant = str(existing.get('merchant', '')).lower().strip()
-            existing_date = str(existing.get('date', '')).strip()
-            existing_total = safe_float(existing.get('total', 0))
-            
-            # Check if this looks like a duplicate
-            if (existing_merchant == expense_merchant and
-                existing_date == expense_date and
-                abs(existing_total - expense_total) < 0.01):  # Allow small floating point differences
-                # Duplicate found! Skip it
-                return False
+        # Skip row 0 (headers) and check from row 1 onwards
+        for i, row in enumerate(all_values[1:], start=1):
+            if len(row) >= 3:
+                existing_merchant = str(row[0]).lower().strip() if row[0] else ''
+                existing_date = str(row[1]).strip() if row[1] else ''
+                existing_total = safe_float(row[2]) if row[2] else 0
+                
+                # Check if this looks like a duplicate
+                if (existing_merchant == expense_merchant and
+                    existing_date == expense_date and
+                    abs(existing_total - expense_total) < 0.01):  # Allow small floating point differences
+                    # Duplicate found! Skip it
+                    print(f"⚠️  Receipt from {expense_merchant} on {expense_date} already exists (duplicate prevented)!")
+                    return False
         
         # No duplicate found, safe to add
         # Convert items list to JSON string
@@ -429,7 +436,13 @@ def save_expense_to_gsheet(expense):
             items_json,
             expense.get('uploaded_at', '')
         ]
-        ws.append_row(row)
+        
+        try:
+            ws.append_row(row)
+            print(f"✅ Expense saved: {expense.get('merchant')} - ${expense.get('total')}")
+        except Exception as e:
+            print(f"❌ Error appending expense row: {str(e)}")
+            return False
         
         # ALSO save individual items to Price_History for trend analysis
         save_price_history_to_gsheet(expense)
@@ -455,6 +468,7 @@ def save_price_history_to_gsheet(expense):
         items = expense.get('items', [])
         
         # Save each item as separate row
+        success_count = 0
         for item in items:
             row = [
                 date,
@@ -464,11 +478,23 @@ def save_price_history_to_gsheet(expense):
                 safe_float(item.get('price', 0)),
                 uploaded_at
             ]
-            ws.append_row(row)
+            try:
+                ws.append_row(row)
+                success_count += 1
+            except Exception as e:
+                print(f"⚠️  Error saving item '{item.get('name', '')}': {str(e)}")
+                # Continue with next item even if one fails
+                continue
         
-        return True
+        if success_count > 0:
+            print(f"✅ Saved {success_count} items to price history")
+            return True
+        else:
+            print(f"⚠️  No items saved to price history")
+            return len(items) == 0  # Return True if there were no items anyway
+            
     except Exception as e:
-        st.error(f"Error saving price history: {str(e)}")
+        print(f"Error saving price history: {str(e)}")
         return False
 
 def load_price_history_from_gsheet():
@@ -486,32 +512,41 @@ def load_price_history_from_gsheet():
             print("⚠️  Could not access Price_History worksheet")
             return pd.DataFrame()
         
-        # Use get_all_records instead of get_all_values for better compatibility
+        # Try get_all_records first, fallback to get_all_values if it fails
+        records = None
         try:
             records = ws.get_all_records()
-            if not records:
-                print("📊 No price history records found")
+        except (AttributeError, Exception) as e:
+            print(f"⚠️  get_all_records failed: {str(e)}, trying get_all_values...")
+            try:
+                all_values = ws.get_all_values()
+                if len(all_values) > 1:
+                    # Convert rows to records
+                    records = []
+                    for row in all_values[1:]:
+                        if row:  # Skip empty rows
+                            record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                            records.append(record)
+            except Exception as e2:
+                print(f"⚠️  get_all_values also failed: {str(e2)}")
                 return pd.DataFrame(columns=headers)
-            
-            df = pd.DataFrame(records)
-            
-            # Convert data types
-            df['date'] = pd.to_datetime(df['date'], errors='coerce')
-            df['price'] = df['price'].apply(lambda x: safe_float(x))
-            df['quantity'] = df['quantity'].apply(lambda x: int(safe_float(x)) if safe_float(x) > 0 else 1)
-            
-            print(f"✅ Loaded {len(df)} price history records")
-            return df
-            
-        except AttributeError as ae:
-            print(f"⚠️  AuthorizedSession error (gspread version issue): {str(ae)}")
-            print("Falling back to empty dataframe")
+        
+        if not records:
+            print("📊 No price history records found")
             return pd.DataFrame(columns=headers)
+        
+        df = pd.DataFrame(records)
+        
+        # Convert data types
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df['price'] = df['price'].apply(lambda x: safe_float(x))
+        df['quantity'] = df['quantity'].apply(lambda x: int(safe_float(x)) if safe_float(x) > 0 else 1)
+        
+        print(f"✅ Loaded {len(df)} price history records")
+        return df
             
     except Exception as e:
         print(f"❌ Error loading price history: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return pd.DataFrame()
 
 def analyze_product_price_trends(df, product_name):

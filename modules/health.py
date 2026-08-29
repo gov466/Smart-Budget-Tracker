@@ -1,8 +1,8 @@
 # Health Module - Health Reports, Fitness Plans
 
 import streamlit as st
-from ..config import HEALTH_HEADERS
-from ..gsheet_client import get_gsheet_client
+from config import HEALTH_HEADERS
+from gsheet_client import get_gsheet_client
 
 
 def render_health_tab():

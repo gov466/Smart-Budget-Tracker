@@ -1,7 +1,7 @@
 # Wellness Module - Daily Wellness Log
 
 import streamlit as st
-from ..config import WELLNESS_HEADERS
+from config import WELLNESS_HEADERS
 
 
 def render_wellness_tab():

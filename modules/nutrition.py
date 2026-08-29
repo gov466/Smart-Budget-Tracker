@@ -1,7 +1,7 @@
 # Nutrition Module - Nutrition Tracker with AI Analysis
 
 import streamlit as st
-from ..config import NUTRITION_GOALS, RECIPES, RESTAURANTS
+from config import NUTRITION_GOALS, RECIPES, RESTAURANTS
 
 
 def render_nutrition_tracker_tab():

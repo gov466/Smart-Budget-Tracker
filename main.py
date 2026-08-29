@@ -2,22 +2,22 @@
 # Modular structure for better maintainability
 
 import streamlit as st
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Import from local modules
 from config import APP_TITLE, APP_ICON, LAYOUT, MAIN_TABS
-from modules import (
-    render_settings_tab,
-    render_debts_tab,
-    render_spending_tab,
-    render_wealth_tab,
-    render_health_tab,
-    render_fitness_tab,
-    render_wellness_tab,
-    render_nutrition_tracker_tab,
-    render_fertility_tab,
-    render_shopping_tab,
-    render_budgets_tab
-)
-from modules.budgets import load_budgets
-from modules.settings import load_settings
+from modules.settings import render_settings_tab, load_settings
+from modules.budgets import render_budgets_tab, load_budgets
+from modules.financial import render_debts_tab, render_spending_tab, render_wealth_tab
+from modules.health import render_health_tab, render_fitness_tab
+from modules.wellness import render_wellness_tab
+from modules.nutrition import render_nutrition_tracker_tab
+from modules.fertility import render_fertility_tab
+from modules.shopping import render_shopping_tab, render_shopping_analytics_tab
 
 
 def initialize_session_state():
@@ -54,7 +54,7 @@ def main():
         render_settings_tab,           # Tab 0: ⚙️ Setup
         render_debts_tab,              # Tab 1: 💳 Debts
         render_spending_tab,           # Tab 2: 💰 Spending
-        None,                          # Tab 3: 🛒 Shopping Analytics (placeholder)
+        render_shopping_analytics_tab, # Tab 3: 🛒 Shopping Analytics
         render_wealth_tab,             # Tab 4: 📊 Wealth
         render_health_tab,             # Tab 5: 🏥 Health
         render_fitness_tab,            # Tab 6: 🏋️ Fitness Plan
@@ -73,6 +73,8 @@ def main():
                     tab_func()
                 except Exception as e:
                     st.error(f"❌ Error loading tab: {str(e)}")
+                    import traceback
+                    st.write(traceback.format_exc())
             else:
                 st.info("🔨 This tab is under development")
     

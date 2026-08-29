@@ -1,7 +1,7 @@
 # Shopping Module - Shopping Analytics & Smart Grocery
 
 import streamlit as st
-from ..config import PRICE_HISTORY_HEADERS
+from config import PRICE_HISTORY_HEADERS
 
 
 def render_shopping_tab():

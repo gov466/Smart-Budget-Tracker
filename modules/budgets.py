@@ -1,9 +1,9 @@
 # Budgets Module - Budget Planning & Tracking
 
 import streamlit as st
-from ..config import BUDGET_HEADERS
-from ..gsheet_client import get_gsheet_client, get_all_values_safe, clear_worksheet_safe, insert_row_safe
-from ..utils import safe_float
+from config import BUDGET_HEADERS
+from gsheet_client import get_gsheet_client, get_all_values_safe, clear_worksheet_safe, insert_row_safe
+from utils import safe_float
 
 
 def load_budgets():

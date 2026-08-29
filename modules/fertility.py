@@ -1,7 +1,7 @@
 # Fertility Module - Fertility Cycle Tracking
 
 import streamlit as st
-from ..config import FERTILITY_HEADERS
+from config import FERTILITY_HEADERS
 
 
 def render_fertility_tab():
