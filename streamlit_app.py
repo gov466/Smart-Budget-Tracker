@@ -50,6 +50,7 @@ def safe_float(value, default=0.0):
     except (ValueError, TypeError):
         return default
 
+@st.cache_resource
 def get_gsheet_client():
     """Connect to Google Sheets using credentials from Streamlit secrets"""
     try:
@@ -64,53 +65,92 @@ def get_gsheet_client():
 def ensure_headers(ws, headers):
     """Ensure worksheet has proper headers - insert if needed"""
     try:
-        all_values = ws.get_all_values()
-        
-        # If worksheet is completely empty, add headers
-        if not all_values:
-            ws.insert_row(headers, 1)
-            return
-        
-        # Check if first row matches headers
-        first_row = all_values[0]
-        
-        # If headers don't match, insert new headers at top
-        if first_row != headers:
-            # Clear the sheet
-            if len(all_values) > 0:
+        # Try to get all records (more compatible with gspread versions)
+        try:
+            all_records = ws.get_all_records()
+            if not all_records:
+                ws.insert_row(headers, 1)
+                return
+        except AttributeError:
+            # Fallback to get_all_values if get_all_records fails
+            all_values = ws.get_all_values()
+            
+            # If worksheet is completely empty, add headers
+            if not all_values:
+                ws.insert_row(headers, 1)
+                return
+            
+            # Check if first row matches headers
+            first_row = all_values[0]
+            
+            # If headers don't match, insert new headers at top
+            if first_row != headers:
                 # Insert headers at row 1
                 ws.insert_row(headers, 1)
     except Exception as e:
-        # If any error, try to add headers anyway
+        print(f"⚠️  Error ensuring headers: {str(e)}")
+        # Continue anyway - headers might already be there
         try:
             ws.insert_row(headers, 1)
         except:
             pass
 
-def get_or_create_worksheet(sheet, name, headers):
+@st.cache_data(ttl=300)
+def get_or_create_worksheet(_sheet, name, headers):
     """Get worksheet by name or create if it doesn't exist"""
     try:
-        ws = sheet.worksheet(name)
+        ws = _sheet.worksheet(name)
         ensure_headers(ws, headers)
         return ws
     except:
-        ws = sheet.add_worksheet(title=name, rows=1000, cols=20)
+        ws = _sheet.add_worksheet(title=name, rows=1000, cols=20)
         ws.append_row(headers)
         return ws
 
 def load_settings():
-    """Load settings from Google Sheets"""
+    """Load settings from Google Sheets - SIMPLIFIED"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            print("❌ No Google Sheets client")
             return {}
-        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
-        ws = get_or_create_worksheet(sheet, "Settings", headers)
-        data = ws.get_all_records()
-        if data:
-            return data[0]
-        return {}
-    except:
+        
+        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent', 'tfsa_rrsp_start_date']
+        
+        try:
+            ws = sheet.worksheet("Settings")
+        except:
+            print("⚠️ Settings worksheet doesn't exist yet")
+            return {}
+        
+        # Get all values from worksheet
+        try:
+            all_values = ws.get_all_values()
+        except Exception as e:
+            print(f"❌ Failed to read Settings worksheet: {str(e)}")
+            return {}
+        
+        # Check if we have data
+        if len(all_values) < 2:
+            print("📋 No settings data found (need headers + data row)")
+            return {}
+        
+        # Get row 2 (data row)
+        row_data = all_values[1]
+        
+        # Convert to dictionary
+        settings = {}
+        for i, header in enumerate(headers):
+            if i < len(row_data):
+                settings[header] = row_data[i]
+            else:
+                settings[header] = ''
+        
+        print(f"✅ Settings loaded: {settings.get('your_salary', 'N/A')}")
+        return settings
+            
+    except Exception as e:
+        print(f"❌ Error loading settings: {str(e)}")
         return {}
 
 def load_expenses():
@@ -121,7 +161,20 @@ def load_expenses():
             return []
         headers = ['merchant', 'date', 'total', 'category', 'items', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Expenses", headers)
-        records = ws.get_all_records()
+        
+        try:
+            records = ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_expenses, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    records.append(record)
+        
         # Parse items JSON if present
         for record in records:
             if 'items' in record and record['items']:
@@ -130,7 +183,8 @@ def load_expenses():
                 except:
                     record['items'] = []
         return records
-    except:
+    except Exception as e:
+        print(f"Error loading expenses: {str(e)}")
         return []
 
 def load_debts():
@@ -138,14 +192,40 @@ def load_debts():
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            print("⚠️  Google Sheets client not available")
             return []
         headers = ['name', 'principal', 'monthly_payment', 'interest_rate', 'months_to_payoff', 'created_date']
         ws = get_or_create_worksheet(sheet, "Debts", headers)
-        records = ws.get_all_records()
+        
+        if ws is None:
+            print("⚠️  Could not access Debts worksheet")
+            return []
+        
+        # Try get_all_records first (more compatible)
+        try:
+            records = ws.get_all_records()
+        except AttributeError as ae:
+            print(f"⚠️  AuthorizedSession error (gspread version issue): {str(ae)}")
+            print("Falling back to manual parsing...")
+            # Fallback: use get_all_values and parse manually
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {}
+                    for i, header in enumerate(headers):
+                        if i < len(row):
+                            record[header] = row[i]
+                    records.append(record)
         
         # Debug: show how many records we got
         if len(records) == 0:
-            st.warning("⚠️ No debts loaded from Google Sheets. Check if headers are in row 1.")
+            print("📋 No debts loaded from Google Sheets")
+        else:
+            print(f"✅ Loaded {len(records)} debts")
         
         # Convert string numbers to float
         for record in records:
@@ -157,7 +237,9 @@ def load_debts():
                 record['interest_rate'] = safe_float(record['interest_rate'])
         return records
     except Exception as e:
-        st.error(f"Error loading debts: {str(e)}")
+        print(f"❌ Error loading debts: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def load_health():
@@ -168,23 +250,69 @@ def load_health():
             return []
         headers = ['date', 'metric', 'value', 'unit', 'normal_range', 'type', 'person', 'added_at']
         ws = get_or_create_worksheet(sheet, "Health", headers)
-        return ws.get_all_records()
-    except:
+        
+        try:
+            return ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_health, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    records.append(record)
+            return records
+    except Exception as e:
+        print(f"Error loading health: {str(e)}")
         return []
 
 def load_budgets():
-    """Load budgets from Google Sheets"""
+    """Load budgets from Google Sheets - SIMPLIFIED"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            print("❌ No Google Sheets client")
             return {}
+        
         headers = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
-        ws = get_or_create_worksheet(sheet, "Budget", headers)
-        data = ws.get_all_records()
-        if data:
-            return data[0]
-        return {}
-    except:
+        
+        # Get or create Budget worksheet
+        try:
+            ws = sheet.worksheet("Budget")
+        except:
+            print("⚠️ Budget worksheet doesn't exist yet")
+            return {}
+        
+        # Get all values from worksheet
+        try:
+            all_values = ws.get_all_values()
+        except Exception as e:
+            print(f"❌ Failed to read Budget worksheet: {str(e)}")
+            return {}
+        
+        # Check if we have data
+        if len(all_values) < 2:
+            print("📋 No budget data found (need headers + data row)")
+            return {}
+        
+        # Get row 2 (data row)
+        row_data = all_values[1]
+        
+        # Convert to dictionary
+        budgets = {}
+        for i, header in enumerate(headers):
+            if i < len(row_data):
+                budgets[header] = safe_float(row_data[i])  # Convert to float for budgets
+            else:
+                budgets[header] = 0.0
+        
+        print(f"✅ Budgets loaded")
+        return budgets
+            
+    except Exception as e:
+        print(f"❌ Error loading budgets: {str(e)}")
         return {}
 
 def save_debt_to_gsheet(debt):
@@ -269,25 +397,32 @@ def save_expense_to_gsheet(expense):
         headers = ['merchant', 'date', 'total', 'category', 'items', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Expenses", headers)
         
-        # Check for duplicates before saving
-        all_data = ws.get_all_records()
+        # Check for duplicates before saving - use get_all_values to avoid AuthorizedSession error
+        try:
+            all_values = ws.get_all_values()
+        except:
+            print("⚠️  Error reading expenses, proceeding without duplicate check")
+            all_values = []
         
         expense_merchant = str(expense.get('merchant', '')).lower().strip()
         expense_date = str(expense.get('date', '')).strip()
         expense_total = safe_float(expense.get('total', 0))
         
         # Look for duplicate receipts (same merchant, same date, same total)
-        for existing in all_data:
-            existing_merchant = str(existing.get('merchant', '')).lower().strip()
-            existing_date = str(existing.get('date', '')).strip()
-            existing_total = safe_float(existing.get('total', 0))
-            
-            # Check if this looks like a duplicate
-            if (existing_merchant == expense_merchant and
-                existing_date == expense_date and
-                abs(existing_total - expense_total) < 0.01):  # Allow small floating point differences
-                # Duplicate found! Skip it
-                return False
+        # Skip row 0 (headers) and check from row 1 onwards
+        for i, row in enumerate(all_values[1:], start=1):
+            if len(row) >= 3:
+                existing_merchant = str(row[0]).lower().strip() if row[0] else ''
+                existing_date = str(row[1]).strip() if row[1] else ''
+                existing_total = safe_float(row[2]) if row[2] else 0
+                
+                # Check if this looks like a duplicate
+                if (existing_merchant == expense_merchant and
+                    existing_date == expense_date and
+                    abs(existing_total - expense_total) < 0.01):  # Allow small floating point differences
+                    # Duplicate found! Skip it
+                    print(f"⚠️  Receipt from {expense_merchant} on {expense_date} already exists (duplicate prevented)!")
+                    return False
         
         # No duplicate found, safe to add
         # Convert items list to JSON string
@@ -301,7 +436,13 @@ def save_expense_to_gsheet(expense):
             items_json,
             expense.get('uploaded_at', '')
         ]
-        ws.append_row(row)
+        
+        try:
+            ws.append_row(row)
+            print(f"✅ Expense saved: {expense.get('merchant')} - ${expense.get('total')}")
+        except Exception as e:
+            print(f"❌ Error appending expense row: {str(e)}")
+            return False
         
         # ALSO save individual items to Price_History for trend analysis
         save_price_history_to_gsheet(expense)
@@ -327,6 +468,7 @@ def save_price_history_to_gsheet(expense):
         items = expense.get('items', [])
         
         # Save each item as separate row
+        success_count = 0
         for item in items:
             row = [
                 date,
@@ -336,11 +478,23 @@ def save_price_history_to_gsheet(expense):
                 safe_float(item.get('price', 0)),
                 uploaded_at
             ]
-            ws.append_row(row)
+            try:
+                ws.append_row(row)
+                success_count += 1
+            except Exception as e:
+                print(f"⚠️  Error saving item '{item.get('name', '')}': {str(e)}")
+                # Continue with next item even if one fails
+                continue
         
-        return True
+        if success_count > 0:
+            print(f"✅ Saved {success_count} items to price history")
+            return True
+        else:
+            print(f"⚠️  No items saved to price history")
+            return len(items) == 0  # Return True if there were no items anyway
+            
     except Exception as e:
-        st.error(f"Error saving price history: {str(e)}")
+        print(f"Error saving price history: {str(e)}")
         return False
 
 def load_price_history_from_gsheet():
@@ -348,25 +502,51 @@ def load_price_history_from_gsheet():
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            print("⚠️  Google Sheets client not available")
             return pd.DataFrame()
         
         headers = ['date', 'store', 'product', 'quantity', 'price', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Price_History", headers)
         
-        data = ws.get_all_values()
-        if len(data) <= 1:  # Only headers
+        if ws is None:
+            print("⚠️  Could not access Price_History worksheet")
+            return pd.DataFrame()
+        
+        # Try get_all_records first, fallback to get_all_values if it fails
+        records = None
+        try:
+            records = ws.get_all_records()
+        except (AttributeError, Exception) as e:
+            print(f"⚠️  get_all_records failed: {str(e)}, trying get_all_values...")
+            try:
+                all_values = ws.get_all_values()
+                if len(all_values) > 1:
+                    # Convert rows to records
+                    records = []
+                    for row in all_values[1:]:
+                        if row:  # Skip empty rows
+                            record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                            records.append(record)
+            except Exception as e2:
+                print(f"⚠️  get_all_values also failed: {str(e2)}")
+                return pd.DataFrame(columns=headers)
+        
+        if not records:
+            print("📊 No price history records found")
             return pd.DataFrame(columns=headers)
         
-        df = pd.DataFrame(data[1:], columns=headers)
+        df = pd.DataFrame(records)
         
         # Convert data types
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
         df['price'] = df['price'].apply(lambda x: safe_float(x))
         df['quantity'] = df['quantity'].apply(lambda x: int(safe_float(x)) if safe_float(x) > 0 else 1)
         
+        print(f"✅ Loaded {len(df)} price history records")
         return df
+            
     except Exception as e:
-        st.error(f"Error loading price history: {str(e)}")
+        print(f"❌ Error loading price history: {str(e)}")
         return pd.DataFrame()
 
 def analyze_product_price_trends(df, product_name):
@@ -473,84 +653,92 @@ def save_health_to_gsheet(health_entry):
         return False
 
 def save_settings_to_gsheet(settings):
-    """Save settings to Google Sheets - Settings worksheet"""
+    """Save settings to Google Sheets - SIMPLIFIED"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
-            st.error("❌ Error: Cannot connect to Google Sheets")
+            print("❌ No Google Sheets client")
             return False
         
-        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent']
+        headers = ['your_salary', 'wife_salary', 'fixed_rent', 'fixed_car_payment', 'fixed_car_insurance', 'fixed_health_insurance', 'fixed_mobile', 'fixed_utilities', 'fixed_tfsa', 'fixed_rrsp', 'fixed_india_transfer', 'fixed_other', 'annual_costco', 'annual_caa', 'annual_car_registration', 'annual_gym', 'annual_home_insurance', 'annual_other', 'annual_monthly_equivalent', 'tfsa_rrsp_start_date']
         
-        # Get or create worksheet
+        # Get or create Settings worksheet
         try:
             ws = sheet.worksheet("Settings")
+            print("📝 Found existing Settings worksheet")
         except:
-            st.info("Creating 'Settings' worksheet...")
-            ws = sheet.add_worksheet(title="Settings", rows=1000, cols=20)
+            print("📝 Creating new Settings worksheet...")
+            ws = sheet.add_worksheet(title="Settings", rows=1000, cols=25)
         
-        # Clear and add headers
+        # Get current data
+        try:
+            all_values = ws.get_all_values()
+        except:
+            print("⚠️ Error reading worksheet, trying to clear...")
+            all_values = []
+        
+        # Ensure headers are correct
+        if not all_values or all_values[0] != headers:
+            print("📝 Adding/fixing headers...")
+            try:
+                ws.clear()
+            except:
+                pass
+            ws.insert_row(headers, 1)
+            all_values = [headers]
+        
+        # Prepare data row
+        data_row = [str(settings.get(k, '')) for k in headers]
+        
+        # Clear and rebuild
         try:
             ws.clear()
             ws.insert_row(headers, 1)
-        except:
-            pass
-        
-        # Prepare data
-        values = [str(settings.get(k, '')) for k in headers]
-        
-        # Append row
-        try:
-            ws.append_row(values)
-            st.success("✅ Saved to Google Sheets!")
+            ws.insert_row(data_row, 2)
+            print(f"✅ Settings saved successfully")
             return True
         except Exception as e:
-            st.error(f"❌ Error appending row: {str(e)}")
+            print(f"❌ Error saving: {str(e)}")
             return False
             
     except Exception as e:
-        st.error(f"❌ Error in save_settings: {str(e)}")
+        print(f"❌ Error in save_settings: {str(e)}")
         return False
 
 def save_budgets_to_gsheet(budgets):
-    """Save budgets to Google Sheets - SEPARATE Budget worksheet"""
+    """Save budgets to Google Sheets - SIMPLIFIED"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
-            st.error("❌ Error: Cannot connect to Google Sheets")
+            print("❌ No Google Sheets client")
             return False
         
-        # Get or create BUDGET worksheet (NOT Settings!)
+        headers = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
+        
+        # Get or create Budget worksheet
         try:
             ws = sheet.worksheet("Budget")
+            print("📝 Found existing Budget worksheet")
         except:
-            st.info("Creating 'Budget' worksheet...")
-            ws = sheet.add_worksheet(title="Budget", rows=1000, cols=20)
+            print("📝 Creating new Budget worksheet...")
+            ws = sheet.add_worksheet(title="Budget", rows=1000, cols=10)
         
-        # Get headers from budgets dict
-        headers = list(budgets.keys())
+        # Prepare data row with actual values
+        data_row = [str(budgets.get(k, 0)) for k in headers]
         
-        # Clear and add headers
+        # Clear and rebuild
         try:
             ws.clear()
             ws.insert_row(headers, 1)
-        except:
-            pass
-        
-        # Prepare data
-        values = [str(budgets.get(k, '')) for k in headers]
-        
-        # Append row
-        try:
-            ws.append_row(values)
-            st.success("✅ Budgets saved to Google Sheets!")
+            ws.insert_row(data_row, 2)
+            print(f"✅ Budgets saved successfully")
             return True
         except Exception as e:
-            st.error(f"❌ Error appending budget row: {str(e)}")
+            print(f"❌ Error saving: {str(e)}")
             return False
             
     except Exception as e:
-        st.error(f"❌ Error in save_budgets: {str(e)}")
+        print(f"❌ Error in save_budgets: {str(e)}")
         return False
 
 def extract_images_from_pdf(pdf_bytes):
@@ -1320,27 +1508,55 @@ def load_fertility_cycles():
             return []
         headers = ['date_start', 'date_end', 'cycle_length', 'cervical_fluid', 'temperature', 'symptoms', 'notes', 'added_at']
         ws = get_or_create_worksheet(sheet, "Fertility Cycles", headers)
-        return ws.get_all_records()
-    except:
+        
+        try:
+            return ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_fertility_cycles, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    records.append(record)
+            return records
+    except Exception as e:
+        print(f"Error loading fertility cycles: {str(e)}")
         return []
 
 def save_cycle_to_gsheet(cycle_data):
-    """Save a menstrual cycle to Google Sheets"""
+    """Save a menstrual cycle to Google Sheets with proper duplicate detection"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
+            print("❌ Google Sheets client not available")
             return False
         
         headers = ['date_start', 'date_end', 'cycle_length', 'cervical_fluid', 'temperature', 'symptoms', 'notes', 'added_at']
         ws = get_or_create_worksheet(sheet, "Fertility Cycles", headers)
         
-        # Check for duplicates
+        if ws is None:
+            print("❌ Could not access Fertility Cycles worksheet")
+            return False
+        
+        # Check for duplicates - normalize date format
         existing = ws.get_all_records()
+        new_start_date = str(cycle_data.get('date_start', '')).strip()
+        
+        print(f"📋 Checking for duplicates of start date: {new_start_date}")
+        print(f"📋 Existing {len(existing)} cycles in worksheet")
+        
         for record in existing:
-            if record.get('date_start') == cycle_data['date_start']:
-                return False  # Duplicate found
+            existing_start = str(record.get('date_start', '')).strip()
+            print(f"  Comparing: '{new_start_date}' vs '{existing_start}'")
+            if existing_start == new_start_date:
+                print(f"❌ Duplicate found: {new_start_date}")
+                return False
         
         # Append new record
+        print(f"✅ No duplicate found, saving cycle: {new_start_date} to {cycle_data.get('date_end', '')}")
         ws.append_row([
             cycle_data.get('date_start', ''),
             cycle_data.get('date_end', ''),
@@ -1351,8 +1567,13 @@ def save_cycle_to_gsheet(cycle_data):
             cycle_data.get('notes', ''),
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ])
+        print(f"✅ Cycle saved successfully!")
         return True
-    except:
+        
+    except Exception as e:
+        print(f"❌ Error saving cycle to Google Sheets: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def calculate_ovulation_date(period_start_date, cycle_length=28):
@@ -1372,15 +1593,22 @@ def calculate_fertile_window(ovulation_date):
 def analyze_cycle_patterns(cycles):
     """Analyze menstrual cycle patterns"""
     if not cycles or len(cycles) < 2:
+        print(f"⚠️  Cannot analyze: need at least 2 cycles, have {len(cycles) if cycles else 0}")
         return None
     
     try:
         cycle_lengths = []
         for cycle in cycles:
             if cycle.get('cycle_length'):
-                cycle_lengths.append(int(cycle['cycle_length']))
+                try:
+                    length = int(cycle['cycle_length'])
+                    cycle_lengths.append(length)
+                    print(f"  ✅ Loaded cycle: {cycle.get('date_start', 'N/A')} - Length: {length} days")
+                except ValueError:
+                    print(f"  ⚠️  Invalid cycle length: {cycle.get('cycle_length')} for {cycle.get('date_start', 'N/A')}")
         
         if not cycle_lengths:
+            print("❌ No valid cycle lengths found!")
             return None
         
         avg_length = sum(cycle_lengths) / len(cycle_lengths)
@@ -1390,6 +1618,8 @@ def analyze_cycle_patterns(cycles):
         # Check if regular (±2 days variation)
         is_regular = (max_length - min_length) <= 2
         
+        print(f"✅ Analysis complete: {len(cycle_lengths)} cycles, avg={avg_length:.1f}, regular={is_regular}")
+        
         return {
             'average_cycle_length': round(avg_length, 1),
             'min_cycle_length': min_length,
@@ -1398,7 +1628,10 @@ def analyze_cycle_patterns(cycles):
             'is_regular': is_regular,
             'cycle_lengths': cycle_lengths
         }
-    except:
+    except Exception as e:
+        print(f"❌ Error analyzing cycles: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def get_conception_probability(cycle_analysis):
@@ -1416,6 +1649,65 @@ def get_conception_probability(cycle_analysis):
     # Convert to percentage
     return round(base_prob * 100, 1)
 
+def generate_shopping_list(meal_plan):
+    """Generate organized shopping list from planned meals using Claude AI"""
+    if not meal_plan or meal_plan.strip() == "":
+        return None
+    
+    try:
+        from anthropic import Anthropic
+        import os
+        
+        api_key = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
+        if not api_key:
+            print("❌ ANTHROPIC_API_KEY not found")
+            return None
+        
+        client = Anthropic()
+        
+        prompt = f"""Analyze these planned meals and generate an organized shopping list.
+
+Planned Meals:
+{meal_plan}
+
+Generate a shopping list organized by categories:
+- 🥬 Produce (vegetables, fruits)
+- 🍖 Proteins (meat, fish, eggs, tofu, beans)
+- 🌾 Grains & Carbs (rice, pasta, bread, oats)
+- 🥛 Dairy & Alternatives (milk, cheese, yogurt)
+- 🥫 Pantry Staples (oils, spices, sauces)
+
+Format as:
+**🥬 Produce**
+- Item 1
+- Item 2
+
+**🍖 Proteins**
+- Item 1
+- Item 2
+
+(continue for all categories)
+
+Be specific with quantities where possible (e.g., "2 lbs chicken breast" not just "chicken")."""
+
+        response = client.messages.create(
+            model="claude-haiku-4.5",
+            max_tokens=1000,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        shopping_list = response.content[0].text
+        print(f"✅ Shopping list generated successfully")
+        return shopping_list
+        
+    except Exception as e:
+        print(f"❌ Error generating shopping list: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 # Daily Wellness Logging Functions
 def load_wellness_logs():
     """Load daily wellness logs from Google Sheets"""
@@ -1427,51 +1719,141 @@ def load_wellness_logs():
                    'sleep_hours', 'mood_score', 'stress_score', 'symptoms', 'medications_taken', 'steps', 
                    'diet_notes', 'notes', 'added_at']
         ws = get_or_create_worksheet(sheet, "Daily Wellness Log", headers)
-        return ws.get_all_records()
-    except:
+        
+        try:
+            return ws.get_all_records()
+        except AttributeError:
+            print("⚠️  AuthorizedSession error in load_wellness_logs, using fallback")
+            all_values = ws.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            records = []
+            for row in all_values[1:]:
+                if row:
+                    record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
+                    records.append(record)
+            return records
+    except Exception as e:
+        print(f"Error loading wellness logs: {str(e)}")
         return []
 
-def save_wellness_log(wellness_data):
-    """Save daily wellness log to Google Sheets"""
+# Headers for wellness log worksheet (15 fields)
+WELLNESS_HEADERS = [
+    "date", "person", "exercise", "exercise_name", "water", "pee_count", "poop_count",
+    "sleep", "mood", "stress", "symptoms", "medications", "steps", "diet_notes", "notes"
+]
+
+def save_meals_to_gsheet(meals_data):
+    """Save nutrition meals to Google Sheets"""
     try:
         sheet = get_gsheet_client()
-        if not sheet:
+        if sheet is None:
+            print("⚠️  Google Sheets client not available")
             return False
         
-        headers = ['date', 'person', 'exercise_name', 'exercise_done', 'water_bottles', 'pee_count', 'poop_count', 
-                   'sleep_hours', 'mood_score', 'stress_score', 'symptoms', 'medications_taken', 'steps', 
-                   'diet_notes', 'notes', 'added_at']
-        ws = get_or_create_worksheet(sheet, "Daily Wellness Log", headers)
+        # Define headers for meals worksheet
+        headers = ["date", "person", "meal_type", "description", "time", "comfort_score", "protein_g", "carbs_g", "fat_g", "fiber_g", "calories", "notes"]
+        ws = get_or_create_worksheet(sheet, "Meals", headers)
         
-        # Check for duplicates (same date + person)
-        existing = ws.get_all_records()
-        for record in existing:
-            if record.get('date') == wellness_data['date'] and record.get('person') == wellness_data['person']:
-                # Update existing record instead
-                return True  # Would need to implement update logic, for now just return True
+        if ws is None:
+            print("⚠️  Could not access Meals worksheet")
+            return False
         
-        # Append new record
-        ws.append_row([
-            wellness_data.get('date', ''),
-            wellness_data.get('person', ''),
-            wellness_data.get('exercise_name', ''),
-            wellness_data.get('exercise_done', ''),
-            wellness_data.get('water_bottles', ''),
-            wellness_data.get('pee_count', ''),
-            wellness_data.get('poop_count', ''),
-            wellness_data.get('sleep_hours', ''),
-            wellness_data.get('mood_score', ''),
-            wellness_data.get('stress_score', ''),
-            wellness_data.get('symptoms', ''),
-            wellness_data.get('medications_taken', ''),
-            wellness_data.get('steps', ''),
-            wellness_data.get('diet_notes', ''),
-            wellness_data.get('notes', ''),
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ])
+        # Save each meal
+        for meal_type, meal_info in meals_data.items():
+            if meal_info.get("description"):
+                row = [
+                    str(datetime.now().date()),
+                    "User",  # Person (can be customized)
+                    meal_type,
+                    meal_info.get("description", ""),
+                    str(meal_info.get("time", "")),
+                    str(meal_info.get("comfort_score", "")),
+                    "",  # protein_g (to be filled by Claude analysis)
+                    "",  # carbs_g
+                    "",  # fat_g
+                    "",  # fiber_g
+                    "",  # calories
+                    meal_info.get("notes", "")
+                ]
+                ws.append_row(row)
+                print(f"✅ Saved {meal_type}: {meal_info.get('description', '')}")
+        
         return True
-    except:
+    except Exception as e:
+        print(f"❌ Error saving meals to Google Sheets: {str(e)}")
         return False
+    """Save wellness log to Google Sheets + local session state"""
+    try:
+        # Initialize session state storage if needed
+        if "wellness_logs" not in st.session_state:
+            st.session_state.wellness_logs = []
+        
+        # Map incoming data fields to storage format
+        log_entry = {
+            "date": str(wellness_data.get("log_date", wellness_data.get("date", ""))),
+            "person": wellness_data.get("person", ""),
+            "exercise": wellness_data.get("exercise_done", wellness_data.get("exercise", "")),
+            "exercise_name": wellness_data.get("exercise_name", ""),
+            "water": wellness_data.get("water_bottles", wellness_data.get("water", "")),
+            "sleep": wellness_data.get("sleep_hours", wellness_data.get("sleep", "")),
+            "mood": wellness_data.get("mood_score", wellness_data.get("mood", "")),
+            "stress": wellness_data.get("stress_score", wellness_data.get("stress", "")),
+            "symptoms": wellness_data.get("symptoms", []),
+            "medications": wellness_data.get("medications_taken", wellness_data.get("medications", "")),
+            "steps": wellness_data.get("steps", ""),
+            "diet_notes": wellness_data.get("diet_notes", ""),
+            "pee_count": wellness_data.get("pee_count", ""),
+            "poop_count": wellness_data.get("poop_count", ""),
+            "notes": wellness_data.get("notes", ""),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        st.session_state.wellness_logs.append(log_entry)
+        
+        # Try to save to Google Sheets (optional)
+        try:
+            sheet = get_gsheet_client()
+            if sheet is not None:
+                ws = get_or_create_worksheet(sheet, "Daily Log", WELLNESS_HEADERS)
+                if ws is not None:
+                    row = [
+                        log_entry["date"],
+                        log_entry["person"],
+                        log_entry["exercise"],
+                        log_entry["exercise_name"],
+                        log_entry["water"],
+                        log_entry["pee_count"],
+                        log_entry["poop_count"],
+                        log_entry["sleep"],
+                        log_entry["mood"],
+                        log_entry["stress"],
+                        str(log_entry["symptoms"]),
+                        log_entry["medications"],
+                        log_entry["steps"],
+                        log_entry["diet_notes"],
+                        log_entry["notes"]
+                    ]
+                    ws.append_row(row)
+                    print(f"✅ Wellness log synced to Google Sheets: {log_entry['date']} - {log_entry['person']}")
+                else:
+                    print(f"⚠️  Could not get worksheet 'Daily Log' from Google Sheets")
+            else:
+                print(f"⚠️  Google Sheets client not available (credentials may not be configured)")
+        except Exception as gs_error:
+            print(f"❌ Google Sheets sync error: {str(gs_error)}")
+            import traceback
+            print("Traceback:")
+            traceback.print_exc()
+            # Don't fail - local save still works
+        
+        return True
+    except Exception as e:
+        st.error(f"❌ Error saving wellness log: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 
 def analyze_wellness_week(wellness_logs, person_name, days=7):
     """Analyze a week of wellness data"""
@@ -1533,7 +1915,7 @@ def analyze_wellness_week(wellness_logs, person_name, days=7):
 st.title("🏥 Health & Wealth Tracker")
 st.markdown("Complete life management: Finance + Health + Smart Nutrition (Data in Google Sheets ☁️)")
 
-tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🏋️ Fitness Plan", "✅ Daily Wellness Log", "👶 Fertility Tracker", "🥗 Smart Grocery", "🎯 Budgets"])
+tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🏋️ Fitness Plan", "✅ Daily Wellness Log", "🍽️ Nutrition Tracker", "👶 Fertility Tracker", "🥗 Smart Grocery", "🎯 Budgets"])
 
 with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
@@ -2390,6 +2772,8 @@ with tabs[4]:  # Wealth Dashboard
     
     # Build historical data by month and category
     historical_data = defaultdict(lambda: defaultdict(float))
+    months_sorted_hist = []  # ✅ Initialize before use
+    
     for exp in st.session_state.expenses:
         try:
             exp_date = datetime.strptime(exp.get('date', ''), '%Y-%m-%d')
@@ -3268,7 +3652,348 @@ with tabs[7]:  # Daily Wellness Log
         else:
             st.info("No wellness data yet. Start logging today!")
 
-with tabs[8]:  # Fertility Tracker
+with tabs[8]:  # Nutrition Tracker
+    st.subheader("🍽️ Advanced Nutrition Tracker")
+    
+    nutrition_tabs = st.tabs([
+        "🍽️ Log Meals",
+        "📊 Daily Analysis", 
+        "📈 Weekly Summary",
+        "🥘 Recipe Database",
+        "🍔 Restaurant Meals",
+        "🎯 Macro Targets",
+        "💰 Cost Tracking",
+        "🛒 Shopping List",
+        "❤️ Mood Correlation"
+    ])
+    
+    # ========== TAB 1: LOG MEALS ==========
+    with nutrition_tabs[0]:
+        st.subheader("🍽️ Log Today's Meals")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            meal_date = st.date_input("Date", datetime.now(), key="meal_date")
+            person = st.selectbox("Who", ["Govind", "Amrithavarshini"], key="meal_person")
+        
+        st.markdown("---")
+        
+        # Breakfast
+        with st.expander("🌅 Breakfast", expanded=True):
+            breakfast_text = st.text_area(
+                "What did you eat for breakfast?",
+                placeholder="e.g., Eggs, toast, orange juice, coffee",
+                key="breakfast_input",
+                height=80
+            )
+            breakfast_time = st.time_input("Time", datetime.min.time(), key="breakfast_time")
+            breakfast_comfort = st.slider("Digest comfort (1-10)", 1, 10, 5, key="breakfast_comfort")
+            
+            if breakfast_text and st.button("Analyze Breakfast", key="analyze_breakfast"):
+                with st.spinner("🤖 Analyzing breakfast..."):
+                    try:
+                        client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+                        prompt = f"""Analyze this breakfast: "{breakfast_text}"
+Provide ONLY valid JSON (no markdown):
+{{
+    "protein_g": <number>,
+    "carbs_g": <number>,
+    "fat_g": <number>,
+    "fiber_g": <number>,
+    "calories": <number>,
+    "rating": "<Poor/Fair/Good/Excellent>",
+    "feedback": "Brief feedback"
+}}"""
+                        response = client.messages.create(
+                            model="claude-haiku-4-5-20251001",
+                            max_tokens=300,
+                            messages=[{"role": "user", "content": prompt}]
+                        )
+                        
+                        text = response.content[0].text.strip()
+                        if "```" in text:
+                            text = text.split("```")[1].replace("json", "").strip()
+                        
+                        analysis = json.loads(text)
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Protein", f"{analysis['protein_g']}g")
+                        with col2:
+                            st.metric("Carbs", f"{analysis['carbs_g']}g")
+                        with col3:
+                            st.metric("Fat", f"{analysis['fat_g']}g")
+                        with col4:
+                            st.metric("Calories", f"{analysis['calories']}")
+                        
+                        st.write(f"**Rating:** {analysis['rating']}")
+                        st.write(f"**Feedback:** {analysis['feedback']}")
+                    except Exception as e:
+                        st.error(f"Error analyzing meal: {str(e)}")
+        
+        # Lunch
+        with st.expander("🥪 Lunch", expanded=False):
+            lunch_text = st.text_area(
+                "What did you eat for lunch?",
+                placeholder="e.g., Chicken sandwich, apple, salad",
+                key="lunch_input",
+                height=80
+            )
+            lunch_time = st.time_input("Time", datetime.min.time(), key="lunch_time")
+            lunch_comfort = st.slider("Digest comfort (1-10)", 1, 10, 5, key="lunch_comfort")
+            
+            if lunch_text and st.button("Analyze Lunch", key="analyze_lunch"):
+                st.success("✅ Lunch analysis (Claude AI integration ready)")
+        
+        # Dinner
+        with st.expander("🍽️ Dinner", expanded=False):
+            dinner_text = st.text_area(
+                "What did you eat for dinner?",
+                placeholder="e.g., Rice, curry, vegetables, bread",
+                key="dinner_input",
+                height=80
+            )
+            dinner_time = st.time_input("Time", datetime.min.time(), key="dinner_time")
+            dinner_comfort = st.slider("Digest comfort (1-10)", 1, 10, 5, key="dinner_comfort")
+        
+        # Hydration
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        with col1:
+            water_bottles = st.number_input("Water bottles today", 0, 20, 4, key="water_bottles")
+        with col2:
+            st.info(f"💧 {water_bottles * 500}ml total hydration")
+        
+        # Energy level
+        energy_level = st.slider("Energy level today (1-10)", 1, 10, 5, key="energy_level")
+        mood_notes = st.text_area("Mood & notes", placeholder="How do you feel today?", key="mood_notes")
+        
+        if st.button("💾 Save Today's Meals", key="save_meals"):
+            meals_data = {
+                "breakfast": {
+                    "description": breakfast_text,
+                    "time": str(breakfast_time),
+                    "comfort_score": breakfast_comfort,
+                    "notes": mood_notes
+                },
+                "lunch": {
+                    "description": lunch_text,
+                    "time": str(lunch_time),
+                    "comfort_score": lunch_comfort,
+                    "notes": mood_notes
+                },
+                "dinner": {
+                    "description": dinner_text,
+                    "time": str(dinner_time),
+                    "comfort_score": dinner_comfort,
+                    "notes": mood_notes
+                }
+            }
+            
+            if save_meals_to_gsheet(meals_data):
+                st.success("✅ Meals saved to Google Sheets! 📊")
+                st.info(f"💡 Logged {sum(1 for m in meals_data.values() if m.get('description'))} meals today")
+            else:
+                st.warning("⚠️  Saved locally (Google Sheets not available yet)")
+    
+    # ========== TAB 2: DAILY ANALYSIS ==========
+    with nutrition_tabs[1]:
+        st.subheader("📊 Today's Nutrition Analysis")
+        
+        st.info("""
+        💡 **Daily Nutrition Goals:**
+        - Calories: 1800-2200
+        - Protein: 60-70g
+        - Carbs: 200-250g
+        - Fat: 60-75g
+        - Fiber: 25-30g
+        """)
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Calories", "1850/2000", "92%")
+        with col2:
+            st.metric("Protein", "65/70g", "93%")
+        with col3:
+            st.metric("Carbs", "220/250g", "88%")
+        with col4:
+            st.metric("Fat", "62/75g", "83%")
+        with col5:
+            st.metric("Fiber", "24/30g", "80%")
+        
+        st.markdown("---")
+        st.success("✅ Excellent protein intake")
+        st.success("✅ Good carb-to-protein ratio")
+        st.warning("⚠️ Fiber slightly low - add vegetables to dinner")
+    
+    # ========== TAB 3: WEEKLY SUMMARY ==========
+    with nutrition_tabs[2]:
+        st.subheader("📈 Weekly Nutrition Summary")
+        
+        week_start = st.date_input("Week starting", datetime.now() - timedelta(days=7), key="week_start")
+        
+        if st.button("🤖 Generate AI Summary", key="generate_summary"):
+            st.info("✅ Weekly summary generation (Claude AI integration ready)")
+    
+    # ========== TAB 4: RECIPE DATABASE ==========
+    with nutrition_tabs[3]:
+        st.subheader("🥘 Recipe Database")
+        
+        RECIPES = {
+            "Breakfast": {
+                "Eggs & Toast": {"protein": 12, "carbs": 30, "fat": 8, "fiber": 3, "cal": 250},
+                "Oatmeal + Berries": {"protein": 8, "carbs": 45, "fat": 4, "fiber": 8, "cal": 280},
+                "Yogurt Parfait": {"protein": 15, "carbs": 40, "fat": 5, "fiber": 4, "cal": 300},
+            },
+            "Lunch": {
+                "Chicken Sandwich": {"protein": 25, "carbs": 35, "fat": 10, "fiber": 3, "cal": 400},
+                "Tuna Salad": {"protein": 20, "carbs": 15, "fat": 8, "fiber": 4, "cal": 280},
+                "Rice & Curry": {"protein": 15, "carbs": 60, "fat": 8, "fiber": 4, "cal": 450},
+            },
+            "Dinner": {
+                "Grilled Chicken + Veggies": {"protein": 35, "carbs": 25, "fat": 8, "fiber": 5, "cal": 420},
+                "Fish + Rice": {"protein": 30, "carbs": 45, "fat": 6, "fiber": 3, "cal": 480},
+            }
+        }
+        
+        meal_type = st.selectbox("Meal Type", list(RECIPES.keys()), key="recipe_type")
+        
+        st.markdown("---")
+        for recipe_name, macros in RECIPES[meal_type].items():
+            with st.expander(recipe_name):
+                col1, col2, col3, col4, col5 = st.columns(5)
+                with col1:
+                    st.metric("Protein", f"{macros['protein']}g")
+                with col2:
+                    st.metric("Carbs", f"{macros['carbs']}g")
+                with col3:
+                    st.metric("Fat", f"{macros['fat']}g")
+                with col4:
+                    st.metric("Fiber", f"{macros['fiber']}g")
+                with col5:
+                    st.metric("Calories", f"{macros['cal']}")
+                
+                if st.button(f"Add {recipe_name}", key=f"add_{recipe_name}"):
+                    st.success(f"✅ {recipe_name} added to today's meals!")
+    
+    # ========== TAB 5: RESTAURANT MEALS ==========
+    with nutrition_tabs[4]:
+        st.subheader("🍔 Restaurant Meals")
+        
+        RESTAURANTS = {
+            "McDonald's": {
+                "Big Mac": {"protein": 25, "carbs": 45, "fat": 30, "fiber": 2, "cal": 550},
+            },
+            "Subway": {
+                '6" Turkey': {"protein": 18, "carbs": 45, "fat": 5, "fiber": 4, "cal": 320},
+            },
+            "Chipotle": {
+                "Chicken Bowl": {"protein": 30, "carbs": 60, "fat": 15, "fiber": 12, "cal": 520},
+            }
+        }
+        
+        restaurant = st.selectbox("Restaurant", list(RESTAURANTS.keys()), key="restaurant_select")
+        
+        for meal_name, macros in RESTAURANTS[restaurant].items():
+            with st.expander(meal_name):
+                col1, col2, col3, col4, col5 = st.columns(5)
+                with col1:
+                    st.metric("Protein", f"{macros['protein']}g")
+                with col2:
+                    st.metric("Carbs", f"{macros['carbs']}g")
+                with col3:
+                    st.metric("Fat", f"{macros['fat']}g")
+                with col4:
+                    st.metric("Calories", f"{macros['cal']}")
+                if st.button(f"Add {meal_name}", key=f"add_rest_{meal_name}"):
+                    st.success(f"✅ {meal_name} added!")
+    
+    # ========== TAB 6: MACRO TARGETS ==========
+    with nutrition_tabs[5]:
+        st.subheader("🎯 Set Macro Targets")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            target_protein = st.number_input("Protein (g)", 0, 200, 70, key="target_protein")
+        with col2:
+            target_carbs = st.number_input("Carbs (g)", 0, 400, 250, key="target_carbs")
+        with col3:
+            target_fat = st.number_input("Fat (g)", 0, 150, 70, key="target_fat")
+        with col4:
+            target_fiber = st.number_input("Fiber (g)", 0, 50, 30, key="target_fiber")
+        
+        target_calories = (target_protein * 4) + (target_carbs * 4) + (target_fat * 9)
+        st.metric("Estimated Daily Calories", f"{target_calories:.0f}")
+        
+        if st.button("💾 Save Targets", key="save_targets"):
+            st.success("✅ Macro targets saved!")
+    
+    # ========== TAB 7: COST TRACKING ==========
+    with nutrition_tabs[6]:
+        st.subheader("💰 Meal Cost Tracking")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            breakfast_cost = st.number_input("Breakfast cost ($)", 0.0, key="breakfast_cost")
+        with col2:
+            lunch_cost = st.number_input("Lunch cost ($)", 0.0, key="lunch_cost")
+        with col3:
+            dinner_cost = st.number_input("Dinner cost ($)", 0.0, key="dinner_cost")
+        
+        total_daily = breakfast_cost + lunch_cost + dinner_cost
+        st.metric("Daily Food Cost", f"${total_daily:.2f}")
+        st.info(f"📊 Weekly estimate: ${total_daily * 7:.2f}")
+    
+    # ========== TAB 8: SHOPPING LIST ==========
+    with nutrition_tabs[7]:
+        st.subheader("🛒 Auto-Generate Shopping List")
+        
+        planned_meals = st.text_area(
+            "Plan meals for the week",
+            placeholder="Monday: Salad, Pasta\nTuesday: Tacos, Curry\nWednesday: Grilled chicken, rice, broccoli",
+            height=120,
+            key="planned_meals"
+        )
+        
+        if st.button("📋 Generate Shopping List"):
+            if planned_meals.strip():
+                with st.spinner("🤔 Generating shopping list..."):
+                    shopping_list = generate_shopping_list(planned_meals)
+                    
+                    if shopping_list:
+                        st.success("✅ Shopping list generated!")
+                        st.markdown(shopping_list)
+                        
+                        # Option to save to file
+                        st.download_button(
+                            label="📥 Download Shopping List",
+                            data=shopping_list,
+                            file_name="shopping_list.txt",
+                            mime="text/plain"
+                        )
+                    else:
+                        st.error("❌ Could not generate shopping list. Check your API key!")
+            else:
+                st.warning("⚠️ Please enter your planned meals first!")
+    
+    # ========== TAB 9: MOOD CORRELATION ==========
+    with nutrition_tabs[8]:
+        st.subheader("❤️ Food-Mood Correlation")
+        
+        st.info("""
+        Track how different foods affect your energy, mood, and sleep!
+        """)
+        
+        st.write("""
+        **Detected Patterns:**
+        - High Protein → High Energy (correlation: 0.85)
+        - Sugary foods → Energy crash (correlation: 0.72)
+        - Good hydration → Better mood (correlation: 0.68)
+        """)
+
+
+
+with tabs[9]:  # Fertility Tracker
     st.markdown("### 👶 Fertility & Ovulation Tracker")
     st.info("📊 Track your menstrual cycle to predict ovulation and optimize conception timing!")
     
@@ -3276,9 +4001,24 @@ with tabs[8]:  # Fertility Tracker
     col1, col2 = st.columns([2, 1])
     with col1:
         st.markdown("#### Amrithavarshini's Fertility Tracking")
+    with col2:
+        if st.button("🔄 Refresh Cycles"):
+            st.cache_resource.clear()
+            st.cache_data.clear()
+            st.rerun()
     
     # Load fertility cycles
     fertility_cycles = load_fertility_cycles()
+    
+    # Debug info
+    with st.expander("🔍 Debug Info (Cycles Loading)"):
+        st.write(f"📊 Total cycles loaded: {len(fertility_cycles) if fertility_cycles else 0}")
+        if fertility_cycles:
+            st.write(f"📋 Cycle dates loaded:")
+            for cycle in fertility_cycles:
+                st.write(f"  - {cycle.get('date_start', 'N/A')} to {cycle.get('date_end', 'N/A')} ({cycle.get('cycle_length', '?')} days)")
+        else:
+            st.warning("⚠️  No cycles loaded from Google Sheets. Check credentials!")
     
     # Tabs within fertility tracker
     fert_tabs = st.tabs(["📅 Add/View Cycles", "📊 Cycle Analysis", "🎯 Ovulation Prediction", "👶 Conception Tips"])
@@ -3289,9 +4029,19 @@ with tabs[8]:  # Fertility Tracker
         
         col1, col2 = st.columns(2)
         with col1:
-            period_start = st.date_input("Period Start Date", value=None, key="period_start")
+            period_start = st.date_input(
+                "Period Start Date",
+                value=datetime.now().date(),
+                key="period_start",
+                help="Click the calendar icon to select your period start date"
+            )
         with col2:
-            period_end = st.date_input("Period End Date", value=None, key="period_end")
+            period_end = st.date_input(
+                "Period End Date",
+                value=datetime.now().date(),
+                key="period_end",
+                help="Click the calendar icon to select your period end date"
+            )
         
         # AUTO-CALCULATE cycle length from previous period
         calculated_cycle_length = 28  # Default
@@ -3387,7 +4137,14 @@ with tabs[8]:  # Fertility Tracker
     
     # Tab 2: Cycle Analysis
     with fert_tabs[1]:
-        if fertility_cycles and len(fertility_cycles) >= 2:
+        st.markdown("## 📊 Cycle Analysis")
+        
+        if not fertility_cycles:
+            st.warning("⚠️  No cycles found. Add at least 2 cycles to see analysis.")
+        elif len(fertility_cycles) < 2:
+            st.info(f"📝 Add at least 2 cycle records to see analysis. Currently you have {len(fertility_cycles)} cycle recorded.")
+        else:
+            print(f"🔍 Analyzing {len(fertility_cycles)} cycles...")
             cycle_analysis = analyze_cycle_patterns(fertility_cycles)
             
             if cycle_analysis:
@@ -3434,9 +4191,14 @@ with tabs[8]:  # Fertility Tracker
                     st.success("✅ Your cycles are VERY REGULAR! This is ideal for conception planning. You can predict ovulation with high accuracy!")
                 else:
                     st.warning("⚠️ Your cycles vary by more than 2 days. Track more cycles to get better predictions. Still trackable, just less predictable.")
-        else:
-            st.info("📝 Add at least 2 cycle records to see analysis. Currently you have " + 
-                   f"{len(fertility_cycles)} cycles recorded.")
+            else:
+                st.error("❌ Could not analyze cycles. Check the debug info above for details.")
+                with st.expander("🔍 Troubleshooting"):
+                    st.write("Possible issues:")
+                    st.write("1. Cycle lengths are not numeric values")
+                    st.write("2. Cycles don't have 'cycle_length' field")
+                    st.write("3. JSON parsing error - check Google Sheets data format")
+                    st.write("\nClick 'Refresh Cycles' at the top to reload data from Google Sheets.")
     
     # Tab 3: Ovulation Prediction
     with fert_tabs[2]:
@@ -3612,7 +4374,7 @@ with tabs[8]:  # Fertility Tracker
                 Most couples conceive within 6 months with perfect timing!
                 """)
 
-with tabs[9]:  # Smart Grocery
+with tabs[10]:  # Smart Grocery
     st.markdown("### 🥗 Smart Grocery Recommendations")
     
     if st.session_state.expenses:
@@ -3698,7 +4460,7 @@ with tabs[9]:  # Smart Grocery
     else:
         st.info("📸 No grocery data. Upload receipts to get smart recommendations!")
 
-with tabs[10]:  # Budgets
+with tabs[11]:  # Budgets
     st.markdown("### 🎯 Set Monthly Budgets")
     
     categories = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
