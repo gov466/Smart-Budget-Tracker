@@ -388,7 +388,7 @@ def update_debt_in_gsheet(old_name, new_debt):
         return False
 
 def save_expense_to_gsheet(expense):
-    """Add new expense to Google Sheets (with duplicate prevention)"""
+    """Add new expense to Google Sheets"""
     try:
         sheet = get_gsheet_client()
         if not sheet:
@@ -397,34 +397,6 @@ def save_expense_to_gsheet(expense):
         headers = ['merchant', 'date', 'total', 'category', 'items', 'uploaded_at']
         ws = get_or_create_worksheet(sheet, "Expenses", headers)
         
-        # Check for duplicates before saving - use get_all_values to avoid AuthorizedSession error
-        try:
-            all_values = ws.get_all_values()
-        except:
-            print("⚠️  Error reading expenses, proceeding without duplicate check")
-            all_values = []
-        
-        expense_merchant = str(expense.get('merchant', '')).lower().strip()
-        expense_date = str(expense.get('date', '')).strip()
-        expense_total = safe_float(expense.get('total', 0))
-        
-        # Look for duplicate receipts (same merchant, same date, same total)
-        # Skip row 0 (headers) and check from row 1 onwards
-        for i, row in enumerate(all_values[1:], start=1):
-            if len(row) >= 3:
-                existing_merchant = str(row[0]).lower().strip() if row[0] else ''
-                existing_date = str(row[1]).strip() if row[1] else ''
-                existing_total = safe_float(row[2]) if row[2] else 0
-                
-                # Check if this looks like a duplicate
-                if (existing_merchant == expense_merchant and
-                    existing_date == expense_date and
-                    abs(existing_total - expense_total) < 0.01):  # Allow small floating point differences
-                    # Duplicate found! Skip it
-                    print(f"⚠️  Receipt from {expense_merchant} on {expense_date} already exists (duplicate prevented)!")
-                    return False
-        
-        # No duplicate found, safe to add
         # Convert items list to JSON string
         items_json = json.dumps(expense.get('items', []))
         
@@ -448,6 +420,9 @@ def save_expense_to_gsheet(expense):
         save_price_history_to_gsheet(expense)
         
         return True
+    except Exception as e:
+        st.error(f"Error saving expense: {str(e)}")
+        return False
     except Exception as e:
         st.error(f"Error saving expense: {str(e)}")
         return False
@@ -2217,7 +2192,7 @@ with tabs[2]:  # Spending
             image = Image.open(uploaded_file)
             st.image(image, use_container_width=True)
             
-            st.info("✅ **Duplicate Protection:** If you upload the same receipt twice, duplicates will be automatically skipped!")
+            st.info("✅ **Receipt uploads are enabled!** Upload your receipts to track expenses.")
             
             if st.button("🤖 Process Receipt"):
                 with st.spinner("Processing..."):
