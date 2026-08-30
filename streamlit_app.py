@@ -2232,6 +2232,14 @@ with tabs[2]:  # Spending
                         receipt['category'] = category
                         receipt['uploaded_at'] = datetime.now().isoformat()
                         
+                        # Check if date was extracted - if not, ask user
+                        if not receipt.get('date') or receipt.get('date') == 'None' or receipt.get('date') is None:
+                            st.warning("⚠️ Could not detect receipt date from image.")
+                            st.info("📅 Please enter the receipt date manually:")
+                            receipt_date = st.date_input("Receipt Date", datetime.now().date(), key="receipt_date_input")
+                            receipt['date'] = receipt_date.strftime('%Y-%m-%d')
+                            st.success(f"✅ Date set to {receipt['date']}")
+                        
                         if save_expense_to_gsheet(receipt):
                             st.session_state.expenses.append(receipt)
                             st.success("✅ Receipt processed!")
