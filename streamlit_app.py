@@ -2219,8 +2219,7 @@ with tabs[2]:  # Spending
                             st.session_state.expenses.append(receipt)
                             st.success("✅ Receipt processed!")
                         else:
-                            st.warning(f"⚠️ Receipt from {receipt.get('merchant', 'Unknown')} on {receipt.get('date', 'Unknown')} already exists (duplicate prevented)! ✅\n\nIf this is a new receipt, it may have been uploaded before.")
-                            st.info("💡 Duplicate prevention: Same merchant + date + total = duplicate")
+                            st.error("❌ Error saving receipt")
                             col1, col2, col3 = st.columns(3)
                         with col1:
                             st.metric("Store", receipt.get('merchant', 'N/A'))
