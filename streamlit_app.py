@@ -1931,11 +1931,11 @@ with tabs[0]:  # Setup
                   'uploaded_at': datetime.now().isoformat()
              }
                                 
-             if save_expense_to_gsheet(manual_expense):
-                st.session_state.expenses.append(manual_expense)
-                st.success(f"✅ Added: {manual_merchant} - ${manual_amount:.2f}")
-            else:
-                st.error("❌ Error saving expense")
+    if save_expense_to_gsheet(manual_expense):
+        st.session_state.expenses.append(manual_expense)
+        st.success(f"✅ Added: {manual_merchant} - ${manual_amount:.2f}")
+    else:
+        st.error("❌ Error saving expense")
     # Only show warning if settings are actually empty
     your_salary_current = safe_float(st.session_state.settings.get('your_salary', 0))
     if your_salary_current == 0:
