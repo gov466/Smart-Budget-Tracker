@@ -1907,35 +1907,6 @@ with tabs[0]:  # Setup
         st.write("")  # spacing
     
     st.markdown("---")
-    st.markdown("#### 💰 Or Enter Manually (No Receipt)")
-    st.info("Don't have a receipt? Enter the amount directly!")
-                        
-    col1, col2 = st.columns(2)
-    with col1:
-        manual_merchant = st.text_input("Store/Merchant Name", key="manual_merchant")
-        manual_amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, key="manual_amount")
-    with col2:
-        manual_date = st.date_input("Purchase Date", datetime.now().date(), key="manual_date")
-        manual_category = st.selectbox("Category", ["Groceries", "Dining Out", "Gas", "Transportation", "Shopping", "Entertainment", "Healthcare", "Utilities", "Other"], key="manual_category")
-                        
-    if st.button("➕ Add Manual Expense", key="add_manual_expense"):
-       if not manual_merchant or manual_amount == 0:
-           st.error("❌ Please enter store name and amount")
-       else:
-            manual_expense = {
-                 'merchant': manual_merchant,
-                 'date': manual_date.strftime('%Y-%m-%d'),
-                 'total': manual_amount,
-                 'category': manual_category,
-                  'items': [],
-                  'uploaded_at': datetime.now().isoformat()
-             }
-                                
-    if save_expense_to_gsheet(manual_expense):
-        st.session_state.expenses.append(manual_expense)
-        st.success(f"✅ Added: {manual_merchant} - ${manual_amount:.2f}")
-    else:
-        st.error("❌ Error saving expense")
     # Only show warning if settings are actually empty
     your_salary_current = safe_float(st.session_state.settings.get('your_salary', 0))
     if your_salary_current == 0:
@@ -2248,7 +2219,8 @@ with tabs[2]:  # Spending
                             st.session_state.expenses.append(receipt)
                             st.success("✅ Receipt processed!")
                         else:
-                            st.error("❌ Error saving receipt")
+                            st.warning(f"⚠️ Receipt from {receipt.get('merchant', 'Unknown')} on {receipt.get('date', 'Unknown')} already exists (duplicate prevented)! ✅\n\nIf this is a new receipt, it may have been uploaded before.")
+                            st.info("💡 Duplicate prevention: Same merchant + date + total = duplicate")
                             col1, col2, col3 = st.columns(3)
                         with col1:
                             st.metric("Store", receipt.get('merchant', 'N/A'))
