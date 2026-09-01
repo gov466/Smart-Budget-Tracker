@@ -2122,14 +2122,7 @@ with tabs[2]:  # Spending
     with col1:
         uploaded_file = st.file_uploader("Upload Receipt (JPG/PNG/PDF)", type=["jpg", "jpeg", "png", "gif", "webp", "pdf"], key="receipt_upload")
     with col2:
-        st.markdown("**Force Category?**")
-        force_category = st.selectbox(
-            "Override AI category",
-            ["Auto-Detect", "Gas", "Groceries", "Dining", "Transportation", "Utilities", "Entertainment", "Shopping", "Healthcare", "Other"],
-            index=0,
-            key="force_category",
-            label_visibility="collapsed"
-        )
+        st.write("")  # Spacer
     
     if uploaded_file:
         file_type = uploaded_file.type
@@ -2162,11 +2155,8 @@ with tabs[2]:  # Spending
                             saved_count = 0
                             duplicate_count = 0
                             for receipt in all_receipts:
-                                # Use forced category or auto-detect
-                                if force_category != "Auto-Detect":
-                                    category = force_category
-                                else:
-                                    category = categorize_expense(receipt)
+                                # Auto-detect category
+                                category = categorize_expense(receipt)
                                 receipt['category'] = category
                                 receipt['uploaded_at'] = datetime.now().isoformat()
                                 
@@ -2199,11 +2189,8 @@ with tabs[2]:  # Spending
                     receipt = extract_receipt(uploaded_file.getvalue())
                     
                     if receipt:
-                        # Use forced category or auto-detect
-                        if force_category != "Auto-Detect":
-                            category = force_category
-                        else:
-                            category = categorize_expense(receipt)
+                        # Auto-detect category
+                        category = categorize_expense(receipt)
                         receipt['category'] = category
                         receipt['uploaded_at'] = datetime.now().isoformat()
                         
