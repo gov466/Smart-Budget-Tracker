@@ -1890,7 +1890,7 @@ def analyze_wellness_week(wellness_logs, person_name, days=7):
 st.title("🏥 Health & Wealth Tracker")
 st.markdown("Complete life management: Finance + Health + Smart Nutrition (Data in Google Sheets ☁️)")
 
-tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🏋️ Fitness Plan", "✅ Daily Wellness Log", "🍽️ Nutrition Tracker", "👶 Fertility Tracker", "🥗 Smart Grocery", "🎯 Budgets"])
+tabs = st.tabs(["⚙️ Setup", "💳 Debts", "💰 Spending", "💰 Manual Entry", "🛒 Shopping Analytics", "📊 Wealth", "🏥 Health", "🏋️ Fitness Plan", "✅ Daily Wellness Log", "🍽️ Nutrition Tracker", "👶 Fertility Tracker", "🥗 Smart Grocery", "🎯 Budgets"])
 
 with tabs[0]:  # Setup
     st.markdown("### Monthly Income & Fixed Expenses Setup")
@@ -2258,7 +2258,37 @@ with tabs[2]:  # Spending
                                 else:
                                     st.error("❌ Error saving expense")
 
-with tabs[3]:  # Shopping Analytics
+with tabs[3]:  # Manual Entry
+    st.markdown("### 💰 Manual Expense Entry")
+    st.info("Add expenses without a receipt")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        man_store = st.text_input("Store/Merchant Name", key="manual_store")
+        man_amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, key="manual_amount")
+    with col2:
+        man_date = st.date_input("Purchase Date", datetime.now().date(), key="manual_date")
+        man_cat = st.selectbox("Category", ["Groceries", "Dining Out", "Gas", "Transportation", "Shopping", "Entertainment", "Healthcare", "Utilities", "Other"], key="manual_cat")
+    
+    if st.button("➕ Add Manual Expense", key="add_manual"):
+        if man_store and man_amount > 0:
+            expense = {
+                'merchant': man_store,
+                'date': man_date.strftime('%Y-%m-%d'),
+                'total': man_amount,
+                'category': man_cat,
+                'items': [],
+                'uploaded_at': datetime.now().isoformat()
+            }
+            if save_expense_to_gsheet(expense):
+                st.session_state.expenses.append(expense)
+                st.success(f"✅ Added: {man_store} - ${man_amount:.2f}")
+            else:
+                st.error("❌ Error saving expense")
+        else:
+            st.error("❌ Please enter store name and amount")
+
+with tabs[4]:  # Shopping Analytics
     st.markdown("### 🛒 Shopping Analytics & Price Trends")
     
     # Load price history
@@ -2461,7 +2491,7 @@ with tabs[3]:  # Shopping Analytics
                 st.markdown("---")
                 st.info(f"💡 By shopping smarter (at cheapest stores), you could save **${savings:.2f}** on your grocery trips!")
 
-with tabs[4]:  # Wealth Dashboard
+with tabs[5]:  # Wealth Dashboard
     st.markdown("### 📊 Complete Financial Dashboard")
     
     # TFSA & RRSP Cumulative Savings Section
@@ -2955,7 +2985,7 @@ with tabs[4]:  # Wealth Dashboard
     else:
         st.info("Need at least 2 months of data to compare.")
 
-with tabs[5]:  # Health
+with tabs[6]:  # Health
     st.markdown("### 🏥 Health Tracking & Analysis with Trends")
     
     st.markdown("#### 👤 Whose health data?")
@@ -3277,7 +3307,7 @@ with tabs[5]:  # Health
     else:
         st.info("📋 Need health data for BOTH Govind and Amrithavarshini to show household recommendations. Upload health reports for both!")
 
-with tabs[6]:  # Fitness Plan
+with tabs[7]:  # Fitness Plan
     st.markdown("### 🏋️ Personalized Fitness Plans")
     st.info("📊 Based on your latest health analysis, here are recommended home exercises!")
     
@@ -3368,7 +3398,7 @@ with tabs[6]:  # Fitness Plan
             else:
                 st.info("No health data for Amrithavarshini. Upload health reports first!")
 
-with tabs[7]:  # Daily Wellness Log
+with tabs[8]:  # Daily Wellness Log
     st.markdown("### ✅ Daily Wellness Tracker")
     st.info("📊 Track your daily habits and get AI insights on your health patterns!")
     
@@ -3654,7 +3684,7 @@ with tabs[7]:  # Daily Wellness Log
         else:
             st.info("No wellness data yet. Start logging today!")
 
-with tabs[8]:  # Nutrition Tracker
+with tabs[9]:  # Nutrition Tracker
     st.subheader("🍽️ Advanced Nutrition Tracker")
     
     nutrition_tabs = st.tabs([
@@ -3995,7 +4025,7 @@ Provide ONLY valid JSON (no markdown):
 
 
 
-with tabs[9]:  # Fertility Tracker
+with tabs[10]:  # Fertility Tracker
     st.markdown("### 👶 Fertility & Ovulation Tracker")
     st.info("📊 Track your menstrual cycle to predict ovulation and optimize conception timing!")
     
@@ -4376,7 +4406,7 @@ with tabs[9]:  # Fertility Tracker
                 Most couples conceive within 6 months with perfect timing!
                 """)
 
-with tabs[10]:  # Smart Grocery
+with tabs[11]:  # Smart Grocery
     st.markdown("### 🥗 Smart Grocery Recommendations")
     
     if st.session_state.expenses:
@@ -4462,7 +4492,7 @@ with tabs[10]:  # Smart Grocery
     else:
         st.info("📸 No grocery data. Upload receipts to get smart recommendations!")
 
-with tabs[11]:  # Budgets
+with tabs[12]:  # Budgets
     st.markdown("### 🎯 Set Monthly Budgets")
     
     categories = ['Groceries', 'Dining', 'Transportation', 'Entertainment', 'Shopping', 'Healthcare']
