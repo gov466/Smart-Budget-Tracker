@@ -242,6 +242,81 @@ def load_debts():
         traceback.print_exc()
         return []
 
+def project_months_remaining(balance, monthly_payment, annual_rate=0):
+    """Project how many more months until a balance reaches zero, given a fixed
+    monthly payment and annual interest rate. Capped at 1200 months (100 years)
+    to avoid an infinite loop when the payment doesn't cover the interest."""
+    if balance <= 0:
+        return 0
+    if monthly_payment <= 0:
+        return 0
+
+    monthly_rate = (annual_rate / 100.0) / 12.0
+    months = 0
+    projected = balance
+    while projected > 0 and months < 1200:
+        projected = projected + (projected * monthly_rate) - monthly_payment
+        months += 1
+        if monthly_rate == 0 and monthly_payment <= 0:
+            break
+    return months
+
+def get_debt_progress(debt):
+    """Estimate a debt's CURRENT remaining balance and payoff timeline based on
+    time elapsed since it was added (or last edited), assuming the monthly
+    payment has been made on schedule each month. This is a display-time
+    projection only - the stored 'principal' value in Google Sheets is never
+    modified here, so nothing is lost if the estimate needs correcting later
+    (just edit the debt with the real current balance)."""
+    original_principal = safe_float(debt.get('principal', 0))
+    monthly_payment = safe_float(debt.get('monthly_payment', 0))
+    annual_rate = safe_float(debt.get('interest_rate', 0))
+    created_date_str = debt.get('created_date', '')
+
+    result = {
+        'current_balance': original_principal,
+        'original_principal': original_principal,
+        'months_elapsed': 0,
+        'months_remaining': int(safe_float(debt.get('months_to_payoff', 0))),
+        'percent_paid': 0.0
+    }
+
+    if original_principal <= 0 or monthly_payment <= 0 or not created_date_str:
+        return result
+
+    try:
+        created_date = datetime.fromisoformat(str(created_date_str))
+    except (ValueError, TypeError):
+        return result
+
+    now = datetime.now()
+    months_elapsed = (now.year - created_date.year) * 12 + (now.month - created_date.month)
+    if now.day < created_date.day:
+        months_elapsed -= 1
+    months_elapsed = max(0, months_elapsed)
+
+    monthly_rate = (annual_rate / 100.0) / 12.0
+    balance = original_principal
+    for _ in range(months_elapsed):
+        if balance <= 0:
+            break
+        balance = balance + (balance * monthly_rate) - monthly_payment
+    balance = max(0.0, round(balance, 2))
+
+    months_remaining = project_months_remaining(balance, monthly_payment, annual_rate)
+
+    percent_paid = 0.0
+    if original_principal > 0:
+        percent_paid = max(0.0, min(100.0, (1 - (balance / original_principal)) * 100))
+
+    result.update({
+        'current_balance': balance,
+        'months_elapsed': months_elapsed,
+        'months_remaining': months_remaining,
+        'percent_paid': percent_paid
+    })
+    return result
+
 def load_health():
     """Load health metrics from Google Sheets"""
     try:
@@ -2036,18 +2111,20 @@ with tabs[1]:  # Debts
     if st.session_state.debts:
         total_debt = 0
         total_monthly_payment = 0
+        months_remaining_list = []
         
         for i, debt in enumerate(st.session_state.debts):
+            progress = get_debt_progress(debt)
             col1, col2, col3, col4, col5, col6 = st.columns([2, 1, 1, 1, 0.7, 0.7])
             
             with col1:
                 st.write(f"**{debt.get('name', 'N/A')}**")
             with col2:
-                st.write(f"${debt.get('principal', 0):.2f}")
+                st.write(f"${progress['current_balance']:.2f}")
             with col3:
                 st.write(f"${debt.get('monthly_payment', 0):.2f}/mo")
             with col4:
-                st.write(f"{debt.get('months_to_payoff', 0)} months")
+                st.write(f"{progress['months_remaining']} months")
             with col5:
                 if st.button("✏️", key=f"edit_debt_{i}", help="Edit"):
                     st.session_state[f"editing_debt_{i}"] = not st.session_state.get(f"editing_debt_{i}", False)
@@ -2058,14 +2135,18 @@ with tabs[1]:  # Debts
                         st.success(f"✅ {debt.get('name', '')} deleted!")
                         st.rerun()
             
+            if progress['original_principal'] > 0:
+                st.caption(f"Started at ${progress['original_principal']:.2f} • {progress['percent_paid']:.0f}% paid off over {progress['months_elapsed']} month(s)")
+            
             # Edit form
             if st.session_state.get(f"editing_debt_{i}", False):
                 st.write("**Edit Debt:**")
+                st.caption("Tip: set Principal to your real current balance (e.g. from a statement) to reset the tracking baseline to today.")
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     edit_name = st.text_input("Debt Name", value=debt.get('name', ''), key=f"edit_name_{i}")
                 with col2:
-                    edit_principal = st.number_input("Principal", value=safe_float(debt.get('principal', 0)), key=f"edit_principal_{i}")
+                    edit_principal = st.number_input("Principal", value=progress['current_balance'], key=f"edit_principal_{i}")
                 with col3:
                     edit_payment = st.number_input("Monthly Payment", value=safe_float(debt.get('monthly_payment', 0)), key=f"edit_payment_{i}")
                 with col4:
@@ -2074,14 +2155,14 @@ with tabs[1]:  # Debts
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.button("💾 Save", key=f"save_edit_{i}"):
-                        new_months = int(edit_principal / edit_payment) if edit_payment > 0 else 0
+                        new_months = project_months_remaining(edit_principal, edit_payment, edit_rate)
                         updated_debt = {
                             'name': edit_name,
                             'principal': edit_principal,
                             'monthly_payment': edit_payment,
                             'interest_rate': edit_rate,
                             'months_to_payoff': new_months,
-                            'created_date': debt.get('created_date', '')
+                            'created_date': datetime.now().isoformat()
                         }
                         if update_debt_in_gsheet(debt.get('name', ''), updated_debt):
                             st.session_state.debts[i] = updated_debt
@@ -2093,11 +2174,9 @@ with tabs[1]:  # Debts
                         st.session_state[f"editing_debt_{i}"] = False
                         st.rerun()
             
-            try:
-                total_debt += safe_float(debt.get('principal', 0))
-                total_monthly_payment += safe_float(debt.get('monthly_payment', 0))
-            except:
-                pass
+            total_debt += progress['current_balance']
+            total_monthly_payment += safe_float(debt.get('monthly_payment', 0))
+            months_remaining_list.append(progress['months_remaining'])
         
         st.markdown("---")
         col1, col2, col3 = st.columns(3)
@@ -2106,7 +2185,7 @@ with tabs[1]:  # Debts
         with col2:
             st.metric("Total Monthly Payment", f"${total_monthly_payment:.2f}")
         with col3:
-            max_months = max([d.get('months_to_payoff', 0) for d in st.session_state.debts], default=0)
+            max_months = max(months_remaining_list, default=0)
             st.metric("Debt-Free Timeline", f"{max_months} months")
     else:
         st.info("No debts tracked yet. Add one above!")
@@ -2696,8 +2775,9 @@ with tabs[5]:  # Wealth Dashboard
             st.write(f"• {debt.get('name', 'N/A')}: ${debt.get('monthly_payment', 0):.2f}")
         st.write(f"**Subtotal: ${finances['debt_payments']:.2f}**")
         
-        total_debt = sum(safe_float(d.get('principal', 0)) for d in st.session_state.debts)
-        max_months = max([safe_float(d.get('months_to_payoff', 0)) for d in st.session_state.debts], default=0)
+        debt_progress_list = [get_debt_progress(d) for d in st.session_state.debts]
+        total_debt = sum(p['current_balance'] for p in debt_progress_list)
+        max_months = max([p['months_remaining'] for p in debt_progress_list], default=0)
         st.success(f"🎯 **DEBT-FREE IN {int(max_months)} MONTHS!** (Total debt: ${total_debt:.2f})")
     
     st.markdown("---")
@@ -2728,20 +2808,21 @@ with tabs[5]:  # Wealth Dashboard
     # NEW: Debt Payoff Timeline
     st.markdown("#### 🎯 Debt Payoff Timeline")
     if st.session_state.debts:
-        debts_sorted = sorted(st.session_state.debts, key=lambda x: safe_float(x.get('months_to_payoff', 0)))
+        debts_with_progress = [(d, get_debt_progress(d)) for d in st.session_state.debts]
+        debts_sorted = sorted(debts_with_progress, key=lambda x: x[1]['months_remaining'])
         
-        for debt in debts_sorted:
+        for debt, progress in debts_sorted:
             name = debt.get('name', 'N/A')
-            months = int(safe_float(debt.get('months_to_payoff', 0)))
-            principal = safe_float(debt.get('principal', 0))
+            months = progress['months_remaining']
+            principal = progress['current_balance']
             
-            # Progress bar (0-100 based on months)
-            progress = min(100, (months / 100) * 100)  # Scale months to 0-100
+            # Progress bar - percent of ORIGINAL balance paid off so far
+            percent_paid = progress['percent_paid']
             
             col1, col2 = st.columns([3, 1])
             with col1:
                 st.write(f"**{name}**")
-                st.progress(progress / 100)
+                st.progress(percent_paid / 100)
             with col2:
                 st.write(f"**{months}mo**")
                 st.write(f"${principal:.0f}")
