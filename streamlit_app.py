@@ -95,7 +95,7 @@ def ensure_headers(ws, headers):
         except:
             pass
 
-@st.cache_data(ttl=300)
+@st.cache_resource
 def get_or_create_worksheet(_sheet, name, headers):
     """Get worksheet by name or create if it doesn't exist"""
     try:
@@ -411,18 +411,15 @@ def save_expense_to_gsheet(expense):
         
         try:
             ws.append_row(row)
-            print(f"✅ Expense saved: {expense.get('merchant')} - ${expense.get('total')}")
+            print(f"Expense saved: {expense.get('merchant')} - ${expense.get('total')}")
         except Exception as e:
-            print(f"❌ Error appending expense row: {str(e)}")
+            st.error(f"Error saving receipt to Google Sheets: {str(e)}")
             return False
         
         # ALSO save individual items to Price_History for trend analysis
         save_price_history_to_gsheet(expense)
         
         return True
-    except Exception as e:
-        st.error(f"Error saving expense: {str(e)}")
-        return False
     except Exception as e:
         st.error(f"Error saving expense: {str(e)}")
         return False
@@ -2135,7 +2132,7 @@ with tabs[2]:  # Spending
             if pdf_images:
                 st.write(f"✅ Extracted {len(pdf_images)} page(s) from PDF")
                 
-                st.info("✅ **Duplicate Protection:** If you upload a PDF with receipts you've already uploaded, duplicates will be automatically skipped!")
+                st.info("Each page will be processed and saved as a separate expense.")
                 
                 if st.button("🤖 Process PDF Receipt"):
                     with st.spinner(f"Processing {len(pdf_images)} page(s)..."):
@@ -2153,7 +2150,7 @@ with tabs[2]:  # Spending
                             
                             # Process each receipt
                             saved_count = 0
-                            duplicate_count = 0
+                            failed_count = 0
                             for receipt in all_receipts:
                                 # Auto-detect category
                                 category = categorize_expense(receipt)
@@ -2164,14 +2161,14 @@ with tabs[2]:  # Spending
                                     st.session_state.expenses.append(receipt)
                                     saved_count += 1
                                 else:
-                                    duplicate_count += 1
+                                    failed_count += 1
                             
                             if saved_count > 0:
-                                st.success(f"✅ {saved_count} receipt(s) processed from PDF!")
+                                st.success(f"{saved_count} receipt(s) processed from PDF!")
                                 st.balloons()
                             
-                            if duplicate_count > 0:
-                                st.warning(f"⚠️ {duplicate_count} receipt(s) from PDF were duplicates and were skipped (prevented)! ✅")
+                            if failed_count > 0:
+                                st.warning(f"{failed_count} receipt(s) from the PDF could not be saved to Google Sheets. See the error message(s) above for details.")
                         else:
                             st.error("❌ Could not extract receipts from PDF. Make sure it contains clear images of receipts.")
             else:
@@ -2204,25 +2201,25 @@ with tabs[2]:  # Spending
                         
                         if save_expense_to_gsheet(receipt):
                             st.session_state.expenses.append(receipt)
-                            st.success("✅ Receipt processed!")
-                        else:
-                            st.warning(f"⚠️ Receipt from {receipt.get('merchant', 'Unknown')} on {receipt.get('date', 'Unknown')} already exists (duplicate prevented)! ✅\n\nIf this is a new receipt, it may have been uploaded before.")
-                            st.info("💡 Duplicate prevention: Same merchant + date + total = duplicate")
+                            st.success("Receipt processed!")
+                            
                             col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Store", receipt.get('merchant', 'N/A'))
-                        with col2:
-                            st.metric("Total", f"${receipt.get('total', 0):.2f}")
-                        with col3:
-                            st.metric("Category", category)
-                        
-                        st.markdown("#### 📋 Items Extracted:")
-                        items = receipt.get('items', [])
-                        if items:
-                            for item in items:
-                                st.write(f"• {item.get('name', 'N/A')} - Qty: {item.get('quantity', 1)}, Price: ${item.get('price', 0):.2f}")
+                            with col1:
+                                st.metric("Store", receipt.get('merchant', 'N/A'))
+                            with col2:
+                                st.metric("Total", f"${receipt.get('total', 0):.2f}")
+                            with col3:
+                                st.metric("Category", category)
+                            
+                            st.markdown("#### Items Extracted:")
+                            items = receipt.get('items', [])
+                            if items:
+                                for item in items:
+                                    st.write(f"- {item.get('name', 'N/A')} - Qty: {item.get('quantity', 1)}, Price: ${item.get('price', 0):.2f}")
+                            else:
+                                st.info("No items found in receipt")
                         else:
-                            st.info("No items found in receipt")
+                            st.error("Could not save this receipt to Google Sheets. See the error message above for details, then try again.")
                     else:
                         st.error("Error saving receipt to Google Sheets")
 
